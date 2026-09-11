@@ -8,8 +8,6 @@ Release binaries for the [DCS CLI](https://dilmune.com). Source code lives in th
 brew install dilmune/tap/dcs
 ```
 
-Or:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dilmune/dcs/master/scripts/install-cli.sh | sh
-```
+For manual installation, download the archive for your platform from the
+[latest release](https://github.com/Dilmune/dcs-cli/releases/latest).
+Checksums are included in `checksums.txt`.
