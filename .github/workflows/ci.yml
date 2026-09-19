@@ -1,0 +1,129 @@
+name: CLI checks
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_call:
+    inputs:
+      release-tag:
+        description: Existing tag selected by the release workflow.
+        type: string
+        default: ""
+    outputs:
+      artifact-id:
+        description: Immutable package artifact produced by this invocation.
+        value: ${{ jobs.packages.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+env:
+  GOENV: "off"
+  GOWORK: "off"
+  GOTOOLCHAIN: local
+  GOFLAGS: "-mod=readonly"
+  DCS_API_KEY: ""
+  DCS_API_URL: http://127.0.0.1:1
+  NO_COLOR: "1"
+
+jobs:
+  native:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go
+      - name: Test standalone CLI
+        env:
+          CGO_ENABLED: "1"
+          DCS_CONFIG_DIR: ${{ runner.temp }}/dcs-cli-test
+        run: |
+          test -z "$(gofmt -l cmd internal)"
+          go mod tidy -diff
+          go mod verify
+          go vet ./...
+          go test -race -count=1 ./...
+          git diff --exit-code -- go.mod go.sum
+
+  packages:
+    name: Scan and package six targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      CLI_RELEASE_TAG: ${{ inputs.release-tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Isolate tool and CLI state
+        run: |
+          echo "DCS_CONFIG_DIR=$RUNNER_TEMP/dcs-cli-package" >> "$GITHUB_ENV"
+          echo "GOBIN=$RUNNER_TEMP/dcs-cli-tools" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-go
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.21.0"
+      - name: Verify release guards
+        run: |
+          node --test scripts/release-check.test.mjs
+          node scripts/release-check.mjs source "$CLI_RELEASE_TAG"
+      - name: Install pinned scanners
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          echo "$GOBIN" >> "$GITHUB_PATH"
+      - name: Scan source and public history
+        run: |
+          gitleaks dir . --redact --ignore-gitleaks-allow --no-banner
+          gitleaks git . --redact --ignore-gitleaks-allow --no-banner
+          for cli_os in linux darwin windows; do
+            for cli_arch in amd64 arm64; do
+              GOOS="$cli_os" GOARCH="$cli_arch" CGO_ENABLED=0 govulncheck -test ./...
+            done
+          done
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          install-only: true
+          version: v2.18.1
+      - name: Build and inspect archives without publishing
+        env:
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          HOMEBREW_TAP_TOKEN: ""
+        run: |
+          goreleaser check --config .goreleaser-public.yaml
+          if [[ -n "$CLI_RELEASE_TAG" ]]; then
+            GORELEASER_CURRENT_TAG="$CLI_RELEASE_TAG" goreleaser release --config .goreleaser-public.yaml --skip=publish --timeout 20m
+          else
+            goreleaser release --config .goreleaser-public.yaml --snapshot --timeout 20m
+          fi
+          node scripts/release-check.mjs archives dist "$CLI_RELEASE_TAG"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: upload
+        with:
+          name: dcs-packages-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          path: |
+            dist/dcs_darwin_amd64.tar.gz
+            dist/dcs_darwin_arm64.tar.gz
+            dist/dcs_linux_amd64.tar.gz
+            dist/dcs_linux_arm64.tar.gz
+            dist/dcs_windows_amd64.zip
+            dist/dcs_windows_arm64.zip
+            dist/checksums.txt

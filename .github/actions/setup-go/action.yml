@@ -1,0 +1,28 @@
+name: Set up CLI Go
+description: Install and verify the exact standalone CLI toolchain.
+
+runs:
+  using: composite
+  steps:
+    - name: Read toolchain pin
+      id: toolchain
+      shell: bash
+      run: |
+        cli_toolchain="$(sed -n 's/^toolchain //p' go.mod)"
+        if [[ ! "$cli_toolchain" =~ ^go[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "go.mod must pin a stable Go toolchain" >&2
+          exit 1
+        fi
+        echo "version=${cli_toolchain#go}" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      with:
+        go-version: ${{ steps.toolchain.outputs.version }}
+        cache: false
+
+    - name: Verify toolchain
+      shell: bash
+      env:
+        CLI_GO_VERSION: ${{ steps.toolchain.outputs.version }}
+        GOTOOLCHAIN: local
+      run: test "$(go env GOVERSION)" = "go${CLI_GO_VERSION}"

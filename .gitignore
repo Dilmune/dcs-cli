@@ -1,0 +1,9 @@
+/bin/
+/dist/
+/generated-docs/
+.env
+.env.*
+!.env.example
+.dcs.json
+coverage.out
+coverage.html
