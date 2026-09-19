@@ -1,0 +1,89 @@
+name: Release CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after all checks and release-environment approval.
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref_type == 'tag'
+    uses: ./.github/workflows/ci.yml
+    with:
+      release-tag: ${{ github.ref_name }}
+
+  publish:
+    needs: verify
+    if: >-
+      github.repository == 'Dilmune/dcs-cli' &&
+      github.ref_type == 'tag' &&
+      inputs.publish &&
+      vars.CLI_PUBLIC_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: cli-release
+    permissions:
+      contents: write
+    steps:
+      - name: Require the exact package artifact
+        env:
+          CLI_ARTIFACT_ID: ${{ needs.verify.outputs.artifact-id }}
+        run: '[[ "$CLI_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact-id }}
+          merge-multiple: true
+          path: release-assets
+      - name: Publish only the verified assets for the existing source tag
+        working-directory: release-assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: Dilmune/dcs-cli
+          CLI_TAG: ${{ github.ref_name }}
+          CLI_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CLI_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$CLI_SHA" =~ ^[0-9a-f]{40}$ ]]
+          cli_remote_sha="$(gh api "repos/$GH_REPO/commits/$CLI_TAG" --jq '.sha')"
+          test "$cli_remote_sha" = "$CLI_SHA"
+          test "$(find . -mindepth 1 -maxdepth 1 | wc -l)" -eq 7
+          for cli_asset in checksums.txt dcs_darwin_amd64.tar.gz dcs_darwin_arm64.tar.gz dcs_linux_amd64.tar.gz dcs_linux_arm64.tar.gz dcs_windows_amd64.zip dcs_windows_arm64.zip; do
+            test -f "$cli_asset"
+            test ! -L "$cli_asset"
+          done
+          test "$(wc -l < checksums.txt)" -eq 6
+          test "$(sort -u checksums.txt | wc -l)" -eq 6
+          awk 'NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 !~ /^dcs_(darwin|linux|windows)_(amd64|arm64)\.(tar\.gz|zip)$/ { exit 1 }' checksums.txt
+          sha256sum --check --strict checksums.txt
+          cli_releases="$(gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100")"
+          if ! printf '%s' "$cli_releases" | jq -e --arg tag "$CLI_TAG" '
+            type == "array" and length > 0 and all(.[];
+              type == "array" and all(.[];
+                (.tag_name | type == "string") and .tag_name != $tag
+              )
+            )
+          ' >/dev/null; then
+            echo "Cannot safely create this release. Inspect existing drafts/releases and the lookup response before retrying." >&2
+            exit 1
+          fi
+          gh release create "$CLI_TAG" \
+            checksums.txt dcs_darwin_amd64.tar.gz dcs_darwin_arm64.tar.gz \
+            dcs_linux_amd64.tar.gz dcs_linux_arm64.tar.gz \
+            dcs_windows_amd64.zip dcs_windows_arm64.zip \
+            --draft --verify-tag --title "CLI $CLI_TAG" \
+            --notes "DCS CLI $CLI_TAG, built from public source commit $CLI_SHA. Release details: https://github.com/Dilmune/dcs-cli/blob/$CLI_SHA/CHANGELOG.md. Install with: brew install dilmune/tap/dcs. Manual downloads and checksums are attached."
+          cli_remote_sha="$(gh api "repos/$GH_REPO/commits/$CLI_TAG" --jq '.sha')"
+          test "$cli_remote_sha" = "$CLI_SHA"
+          gh release edit "$CLI_TAG" --draft=false
