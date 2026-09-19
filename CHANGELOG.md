@@ -1,6 +1,6 @@
 # DCS CLI changes
 
-## 3.8.0 (unreleased)
+## 3.8.0 (2026-09-19)
 
 ### Interactive workspace
 
