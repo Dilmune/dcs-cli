@@ -3,13 +3,20 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/dilmune/dcs-cli/internal/client"
 	"github.com/dilmune/dcs-cli/internal/ui"
+	"github.com/dilmune/dcs-cli/internal/workspace"
 )
+
+type dashboardStats struct {
+	ServerCount   int `json:"totalServers"`
+	SiteCount     int `json:"totalSites"`
+	DatabaseCount int `json:"totalDatabases"`
+}
 
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
@@ -21,7 +28,8 @@ func newStatusCmd() *cobra.Command {
 				return fmt.Errorf("auth: %w", err)
 			}
 
-			resp, err := apiClient.Get(context.Background(), client.PathDashboardStats, nil)
+			ctx := context.Background()
+			resp, err := apiClient.Get(ctx, client.PathDashboardStats, nil)
 			if err != nil {
 				return fmt.Errorf("fetch stats: %w", err)
 			}
@@ -31,46 +39,51 @@ func newStatusCmd() *cobra.Command {
 				return nil
 			}
 
-			stats, err := client.Decode[struct {
-				ServerCount   int `json:"totalServers"`
-				SiteCount     int `json:"totalSites"`
-				DatabaseCount int `json:"totalDatabases"`
-			}](resp)
+			stats, err := client.Decode[dashboardStats](resp)
 			if err != nil {
 				return fmt.Errorf("decode stats: %w", err)
 			}
 
-			boxStyle := lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(ui.TextDim).
-				Padding(0, 2)
-
-			numStyle := lipgloss.NewStyle().Foreground(ui.BrandPrimary).Bold(true)
-			labelStyle := lipgloss.NewStyle().Foreground(ui.TextMuted)
-
-			fmt.Println()
-			fmt.Println(ui.Title.Render("  Dashboard"))
-			fmt.Println()
-
-			servers := boxStyle.Render(
-				numStyle.Render(fmt.Sprintf("%d", stats.ServerCount)) + " " + labelStyle.Render("Servers"),
-			)
-			sites := boxStyle.Render(
-				numStyle.Render(fmt.Sprintf("%d", stats.SiteCount)) + " " + labelStyle.Render("Sites"),
-			)
-			databases := boxStyle.Render(
-				numStyle.Render(fmt.Sprintf("%d", stats.DatabaseCount)) + " " + labelStyle.Render("Databases"),
-			)
-
-			row := lipgloss.JoinHorizontal(lipgloss.Top, "  ", servers, "  ", sites, "  ", databases)
-			fmt.Println(row)
-			fmt.Println()
-
-			if cfg.User != nil {
-				ui.PrintKeyValue("Account", cfg.User.Email)
+			if err := workspace.RenderOverview(cmd.OutOrStdout(), workspace.OverviewOptions{
+				Width:   ui.TerminalWidth(),
+				Version: client.Version,
+				Account: statusAccount(ctx),
+				Areas:   uiCatalog(cmd.Root()).Children,
+				Counts: map[string]int{
+					workspace.AreaServers:   stats.ServerCount,
+					workspace.AreaSites:     stats.SiteCount,
+					workspace.AreaDatabases: stats.DatabaseCount,
+				},
+				Theme:   workspace.ThemeAuto,
+				NoColor: plainStatusOutput(),
+			}); err != nil {
+				return fmt.Errorf("render overview: %w", err)
 			}
-			fmt.Println()
 			return nil
 		},
 	}
+}
+
+// An API-key login caches an empty user, so the account line reads the live
+// identity in that case. It is decoration: a failed lookup hides the row
+// rather than failing the overview.
+func statusAccount(ctx context.Context) string {
+	if cfg.User != nil && hasAuthenticatedIdentity(*cfg.User) {
+		return cfg.User.DisplayName()
+	}
+	resp, err := apiClient.Get(ctx, client.PathAuthMe, nil)
+	if err != nil {
+		return ""
+	}
+	user, err := decodeAuthenticatedUser(resp)
+	if err != nil {
+		return ""
+	}
+	return user.DisplayName()
+}
+
+// Layout never depends on color: a pipe, --quiet, --no-color or NO_COLOR all
+// print the same text with no escape sequences.
+func plainStatusOutput() bool {
+	return noColor || quietMode || os.Getenv("NO_COLOR") != "" || !ui.IsTerminal()
 }

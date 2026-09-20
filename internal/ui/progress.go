@@ -5,8 +5,6 @@ import (
 	"io"
 	"strings"
 	"sync"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 const progressBarWidth = 30
@@ -33,7 +31,7 @@ func (pw *ProgressWriter) WrapReader(r io.Reader) io.Reader {
 func (pw *ProgressWriter) Finish() {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
-	bar := lipgloss.NewStyle().Foreground(SuccessGreen).Render(strings.Repeat("█", progressBarWidth))
+	bar := Success.Render(strings.Repeat("█", progressBarWidth))
 	fmt.Printf("\r  %s [%s] 100%%\n", pw.label, bar)
 }
 
@@ -51,8 +49,8 @@ func (pw *ProgressWriter) render() {
 	}
 	empty := progressBarWidth - filled
 
-	barFilled := lipgloss.NewStyle().Foreground(BrandPrimary).Render(strings.Repeat("█", filled))
-	barEmpty := lipgloss.NewStyle().Foreground(TextDim).Render(strings.Repeat("░", empty))
+	barFilled := Accent.Render(strings.Repeat("█", filled))
+	barEmpty := Divider.Render(strings.Repeat("░", empty))
 	pctStr := fmt.Sprintf("%3.0f%%", pct*100)
 
 	fmt.Printf("\r  %s [%s%s] %s", pw.label, barFilled, barEmpty, pctStr)

@@ -20,13 +20,13 @@ func uiCatalog(root *cobra.Command) workspace.Item {
 		}
 		return item
 	}
-	servers := area("servers", "Servers", "Live views and SSH commands", "servers", "ssh")
+	servers := area(workspace.AreaServers, "Servers", "Live views and SSH commands", "servers", "ssh")
 	servers.Children = append([]workspace.Item{{ID: "live-servers", Title: "Your servers", Description: "Read the current server list from Dilmune Cloud.", Request: &workspace.Request{Kind: workspace.Servers}}}, servers.Children...)
-	sites := area("sites", "Sites & deploys", "Live views and deployment commands", "sites", "deploy", "init")
+	sites := area(workspace.AreaSites, "Sites & deploys", "Live views and deployment commands", "sites", "deploy", "init")
 	sites.Children = append([]workspace.Item{{ID: "live-sites", Title: "Your sites", Description: "Choose a server to browse its sites.", Request: &workspace.Request{Kind: workspace.SiteServers}}}, sites.Children...)
 	return workspace.Item{ID: "home", Title: "Your workspace", Description: "Live server and site views. A reference for the rest of your CLI.", Children: []workspace.Item{
 		servers, sites,
-		area("databases", "Databases", "Reference: schemas, queries, backups", "db"),
+		area(workspace.AreaDatabases, "Databases", "Reference: schemas, queries, backups", "db"),
 		area("storage", "Storage", "Reference: buckets and files", "storage"),
 		area("access", "Access", "Reference: keys and account", "keys", "api-keys", "login", "whoami", "logout"),
 		area("operations", "Operations", "Reference: logs, environment, processes", "logs", "env", "firewall", "cron", "daemon", "software", "status", "config", "open"),

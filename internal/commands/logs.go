@@ -194,5 +194,5 @@ func printEvent(eventType, timestamp, message string) {
 	case ui.EventProgress, ui.EventDeploy, ui.EventStatusChanged:
 		icon = ui.Info.Render("●")
 	}
-	fmt.Printf("  %s %s  %s\n", icon, ui.Dim.Render(timestamp), message)
+	fmt.Printf("  %s %s  %s\n", icon, timestamp, message)
 }

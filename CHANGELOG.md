@@ -1,5 +1,33 @@
 # DCS CLI changes
 
+## 3.8.1 (2026-09-20)
+
+### One voice in the terminal
+
+Plain commands and the interactive workspace now share one color system,
+resolved once per run from your terminal's background or `--theme`. The old
+red heading and warm-grey table text are gone; every surface uses the same
+accent and the same three greys, and body text always keeps your terminal's
+own foreground, so output is readable on light terminals too.
+
+`dcs status` prints the same overview you see in `dcs ui`: your account, then
+the six areas with live server, site and database counts. The boxed dashboard
+is retired. JSON output is unchanged.
+
+### Details you can feel
+
+- Every status shows a glyph and the word, `● active`, `◐ deploying`,
+  `○ off`, `✕ failed`, so `--no-color`, pipes and colorblind readers lose
+  nothing.
+- Key-value output right-aligns labels and never prints a bare label with an
+  empty value. When your account has no display name, the email stands in.
+- Tables keep fixed-shape columns like status, region and IPv4 intact and only
+  shrink free text, so sizes no longer truncate at 100 columns.
+- `dcs --help` groups commands by area: Servers, Sites & deploys, Databases,
+  Storage, Access, Operations.
+- The workspace waits 150ms before showing a loading indicator, so fast reads
+  never flash.
+
 ## 3.8.0 (2026-09-19)
 
 ### Interactive workspace

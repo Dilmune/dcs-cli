@@ -63,9 +63,9 @@ func TestStatusUsesDashboardContract(t *testing.T) {
 	})
 	t.Cleanup(setupTest(t, api))
 	output := executeContractCommand(t, newStatusCmd())
-	assert.Contains(t, output, "7 Servers")
-	assert.Contains(t, output, "8 Sites")
-	assert.Contains(t, output, "9 Databases")
+	assert.Contains(t, output, "7 servers")
+	assert.Contains(t, output, "8 sites")
+	assert.Contains(t, output, "9 databases")
 	assert.NotContains(t, output, "Billing:")
 }
 

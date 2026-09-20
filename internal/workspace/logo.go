@@ -20,6 +20,25 @@ const (
 	maximumWelcomeLogoWidth  = 20
 )
 
+const (
+	logoCreamANSI256      = "230"
+	logoCreamANSI         = "15"
+	logoShadeANSI256      = "223"
+	logoShadeANSI         = "7"
+	logoTerracottaANSI256 = "173"
+	logoTerracottaANSI    = "9"
+)
+
+// The approved asset uses this fixed terminal palette, independent of menu
+// theme. RGB values match its 256-color cells exactly, avoiding quantization.
+// This is the only place outside ui/theme.go allowed to name a color.
+func logoPalette() (face, side, terracotta lipgloss.CompleteColor) {
+	face = lipgloss.CompleteColor{TrueColor: "#ffffd7", ANSI256: logoCreamANSI256, ANSI: logoCreamANSI}
+	side = lipgloss.CompleteColor{TrueColor: "#ffd7af", ANSI256: logoShadeANSI256, ANSI: logoShadeANSI}
+	terracotta = lipgloss.CompleteColor{TrueColor: "#d7875f", ANSI256: logoTerracottaANSI256, ANSI: logoTerracottaANSI}
+	return face, side, terracotta
+}
+
 // Pre-sampled from the same approved artwork at terminal-cell resolutions.
 // The standard 32-column mark stays exact; resizes do not stretch its pixels.
 func logoRows(width int) []logoRow {

@@ -48,7 +48,7 @@ func printVersionWarning() {
 		if shouldShowVersionWarning(client.Version, latest) {
 			fmt.Fprintf(os.Stderr, "\n  %s A new version of dcs is available: %s → %s\n",
 				ui.Info.Render("i"),
-				ui.Dim.Render(client.Version),
+				client.Version,
 				ui.Success.Render(latest),
 			)
 			fmt.Fprintf(os.Stderr, "  %s\n\n", ui.Muted.Render("Run 'brew upgrade dcs' or download from github.com/dilmune/dcs-cli"))

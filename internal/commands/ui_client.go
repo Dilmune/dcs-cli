@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dilmune/dcs-cli/internal/client"
+	"github.com/dilmune/dcs-cli/internal/ui"
 	"github.com/dilmune/dcs-cli/internal/workspace"
 )
 
@@ -50,10 +51,7 @@ func (s *uiSource) Identify(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("identify account: %w", safeUIError(err))
 	}
-	if strings.TrimSpace(user.Name) == "" {
-		return user.Email, nil
-	}
-	return user.Name + " · " + user.Email, nil
+	return user.AccountLine(), nil
 }
 
 func (s *uiSource) Load(ctx context.Context, req workspace.Request) (workspace.Item, error) {
@@ -110,7 +108,7 @@ func (s *uiSource) servers(ctx context.Context, req workspace.Request) (workspac
 		if req.Kind == workspace.SiteServers {
 			next.Kind = workspace.Sites
 		}
-		item.Children = append(item.Children, workspace.Item{ID: server.ID, Title: firstUIText(server.Name, server.ID), Description: joinUIText(server.Status, server.Provider, server.Region),
+		item.Children = append(item.Children, workspace.Item{ID: server.ID, Title: firstUIText(server.Name, server.ID), Status: server.Status, Description: joinUIText(server.Provider, server.Region),
 			Fields: uiServerFields(server), Command: "dcs servers info -- " + workspace.Quote(server.ID), Request: &next})
 	}
 	return uiPaginate(item, resp.Meta, req), nil
@@ -134,7 +132,7 @@ func (s *uiSource) sites(ctx context.Context, req workspace.Request) (workspace.
 			return workspace.Item{}, fmt.Errorf("site response contains an invalid ID")
 		}
 		next := workspace.Request{Kind: workspace.SiteDetail, ServerID: req.ServerID, SiteID: site.ID}
-		item.Children = append(item.Children, workspace.Item{ID: site.ID, Title: firstUIText(site.Domain, site.ID), Description: joinUIText(site.ProjectType, site.Status), Fields: uiSiteFields(site), Request: &next})
+		item.Children = append(item.Children, workspace.Item{ID: site.ID, Title: firstUIText(site.Domain, site.ID), Status: site.Status, Description: site.ProjectType, Fields: uiSiteFields(site), Request: &next})
 	}
 	return uiPaginate(item, resp.Meta, req), nil
 }
@@ -154,7 +152,7 @@ func (s *uiSource) server(ctx context.Context, req workspace.Request) (workspace
 	if server.ID != req.ServerID {
 		return workspace.Item{}, fmt.Errorf("server response does not match requested ID")
 	}
-	return workspace.Item{ID: server.ID, Title: firstUIText(server.Name, server.ID), Description: joinUIText(server.Status, server.Provider, server.Region),
+	return workspace.Item{ID: server.ID, Title: firstUIText(server.Name, server.ID), Status: server.Status, Description: joinUIText(server.Provider, server.Region),
 		Fields: uiServerFields(server), Command: "dcs servers info -- " + workspace.Quote(server.ID),
 		Body: "Inspect only. No server changes are performed here."}, nil
 }
@@ -174,22 +172,31 @@ func (s *uiSource) site(ctx context.Context, req workspace.Request) (workspace.I
 	if site.ID != req.SiteID {
 		return workspace.Item{}, fmt.Errorf("site response does not match requested ID")
 	}
-	return workspace.Item{ID: site.ID, Title: firstUIText(site.Domain, site.ID), Description: joinUIText(site.ProjectType, site.Status), Fields: uiSiteFields(site),
+	return workspace.Item{ID: site.ID, Title: firstUIText(site.Domain, site.ID), Status: site.Status, Description: site.ProjectType, Fields: uiSiteFields(site),
 		Command: "dcs sites info --server " + workspace.Quote(req.ServerID) + " -- " + workspace.Quote(site.Domain),
 		Body:    "Inspect only. Find deployment commands under Sites & deploys."}, nil
 }
 
 func uiServerFields(server uiServer) []workspace.Field {
-	return presentUIFields([]workspace.Field{{Label: "ID", Value: server.ID}, {Label: "Status", Value: server.Status}, {Label: "Provider", Value: server.Provider}, {Label: "Region", Value: server.Region},
+	return presentUIFields([]workspace.Field{{Label: "ID", Value: server.ID}, {Label: workspace.LabelStatus, Value: server.Status}, {Label: "Provider", Value: server.Provider}, {Label: "Region", Value: server.Region},
 		{Label: "Size", Value: firstUIText(server.SizeLabel, server.Size, server.Tier)}, {Label: "IPv4", Value: server.IPv4}, {Label: "Created", Value: server.CreatedAt}})
 }
 
+// SSL mirrors dcs sites info: the same label and the same active/off words,
+// so the workspace and the plain command read identically.
 func uiSiteFields(site uiSite) []workspace.Field {
-	ssl := ""
-	if site.SSLEnabled != nil {
-		ssl = strconv.FormatBool(*site.SSLEnabled)
+	return presentUIFields([]workspace.Field{{Label: "ID", Value: site.ID}, {Label: "Type", Value: site.ProjectType}, {Label: workspace.LabelStatus, Value: site.Status}, {Label: workspace.LabelSSL, Value: uiSSLStatus(site.SSLEnabled)}, {Label: "Git branch", Value: site.GitBranch}, {Label: "Created", Value: site.CreatedAt}})
+}
+
+func uiSSLStatus(enabled *bool) string {
+	switch {
+	case enabled == nil:
+		return ""
+	case *enabled:
+		return ui.StatusActive
+	default:
+		return ui.StatusOff
 	}
-	return presentUIFields([]workspace.Field{{Label: "ID", Value: site.ID}, {Label: "Type", Value: site.ProjectType}, {Label: "Status", Value: site.Status}, {Label: "SSL enabled", Value: ssl}, {Label: "Git branch", Value: site.GitBranch}, {Label: "Created", Value: site.CreatedAt}})
 }
 
 func presentUIFields(fields []workspace.Field) []workspace.Field {

@@ -114,7 +114,7 @@ func newEnvListCmd() *cobra.Command {
 				}
 			}
 			if !showValues {
-				fmt.Printf("\n  %s\n", ui.Dim.Render("Use --show-values to reveal full values."))
+				fmt.Printf("\n  %s\n", ui.Muted.Render("Use --show-values to reveal full values."))
 			}
 			fmt.Println()
 			return nil

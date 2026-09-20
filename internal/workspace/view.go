@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+const commandReferenceLabel = "COMMAND REFERENCE · NOT EXECUTED"
+
 func (m model) View() string {
 	w, h := max(1, m.width), max(1, m.height)
 	if m.isTooSmall() {
@@ -40,8 +42,8 @@ func (m model) View() string {
 		body = m.homeView(width, capacity, true)
 	default:
 		body = []string{m.styles.title.Render(m.current.Title)}
-		if m.current.Description != "" {
-			body = append(body, wrap(m.styles.muted.Render(m.current.Description), width)...)
+		if subtitle := m.styles.subtitle(m.current); subtitle != "" {
+			body = append(body, wrap(subtitle, width)...)
 		}
 		body = append(body, "")
 		switch {
@@ -165,20 +167,26 @@ func (m model) listView(width, capacity int) []string {
 	if !split {
 		lines = append(lines, left...)
 		if !m.searching {
-			lines = append(lines, "", m.styles.muted.Render(selected.Description))
+			lines = append(lines, "", m.styles.subtitle(selected))
 		}
 		return lines
 	}
 	rightWidth := width - leftWidth - 4
 	right := []string{m.styles.title.Render(selected.Title)}
-	right = append(right, wrap(selected.Description, rightWidth)...)
+	right = append(right, wrap(m.styles.subtitle(selected), rightWidth)...)
 	right = append(right, "", m.styles.muted.Render("Enter to explore"))
-	if selected.Command != "" {
-		right = append(right, "", m.styles.muted.Render("COMMAND REFERENCE"))
-		right = append(right, wrap("$ "+selected.Command, rightWidth)...)
-	}
+	fields := len(right)
 	for _, f := range selected.Fields {
-		right = append(right, m.styles.muted.Render(f.Label+"  ")+f.Value)
+		if line := m.styles.keyValue(f); line != "" {
+			right = append(right, line)
+		}
+	}
+	if len(right) > fields {
+		right = append(right[:fields], append([]string{""}, right[fields:]...)...)
+	}
+	if selected.Command != "" {
+		right = append(right, "", m.styles.muted.Render(commandReferenceLabel))
+		right = append(right, wrap("$ "+selected.Command, rightWidth)...)
 	}
 	for i := 0; i < max(len(left), len(right)); i++ {
 		l, r := "", ""
@@ -196,13 +204,15 @@ func (m model) listView(width, capacity int) []string {
 func (m model) detailView(item Item, width int) []string {
 	var lines []string
 	for _, f := range item.Fields {
-		lines = append(lines, wrap(m.styles.muted.Render(f.Label+"  ")+f.Value, width)...)
+		if line := m.styles.keyValue(f); line != "" {
+			lines = append(lines, wrap(line, width)...)
+		}
 	}
-	if len(item.Fields) > 0 {
+	if len(lines) > 0 {
 		lines = append(lines, "")
 	}
 	if item.Command != "" {
-		lines = append(lines, m.styles.muted.Render("COMMAND REFERENCE · NOT EXECUTED"))
+		lines = append(lines, m.styles.muted.Render(commandReferenceLabel))
 		lines = append(lines, wrap("$ "+item.Command, width)...)
 		lines = append(lines, "")
 	}

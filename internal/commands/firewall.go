@@ -73,11 +73,11 @@ func newFirewallListCmd() *cobra.Command {
 			}
 
 			fmt.Println()
+			firewall := ui.StatusDisabled
 			if status.Enabled {
-				ui.PrintKeyValue("Firewall", ui.Success.Render("enabled"))
-			} else {
-				ui.PrintKeyValue("Firewall", ui.Muted.Render("disabled"))
+				firewall = ui.StatusEnabled
 			}
+			ui.PrintKeyValue("Firewall", ui.Status(firewall))
 
 			if len(status.Rules) == 0 {
 				fmt.Println()

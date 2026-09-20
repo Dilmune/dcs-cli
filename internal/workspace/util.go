@@ -20,7 +20,7 @@ func Clean(text string) string {
 func Quote(value string) string { return "'" + strings.ReplaceAll(Clean(value), "'", "'\\''") + "'" }
 
 func cleanItem(item Item) Item {
-	item.Title, item.Description, item.Command = Clean(item.Title), Clean(item.Description), Clean(item.Command)
+	item.Title, item.Description, item.Status, item.Command = Clean(item.Title), Clean(item.Description), Clean(item.Status), Clean(item.Command)
 	lines := strings.Split(item.Body, "\n")
 	for i := range lines {
 		lines[i] = Clean(lines[i])

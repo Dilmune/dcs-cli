@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,6 +14,8 @@ const (
 	minimumWidth  = 48
 	minimumHeight = 20
 	queryLimit    = 100
+	// A read that finishes inside this window never shows an indicator.
+	loadingDelay = 150 * time.Millisecond
 )
 
 type loadedMsg struct {
@@ -20,6 +23,7 @@ type loadedMsg struct {
 	item       Item
 	err        error
 }
+type loadingTickMsg struct{ generation int }
 type identityMsg struct {
 	name string
 	err  error
@@ -28,7 +32,7 @@ type welcomeSavedMsg struct{ err error }
 type frameState struct {
 	item    Item
 	cursor  int
-	loading bool
+	pending bool
 	err     error
 }
 type searchResult struct {
@@ -43,7 +47,8 @@ type model struct {
 	cursor, scroll, width, height, generation int
 	searchCursor                              int
 	query                                     []rune
-	searching, help, welcome, loading         bool
+	searching, help, welcome                  bool
+	pending, loading                          bool
 	account, version, notice                  string
 	err                                       error
 	fetch                                     func(Request, int) (tea.Cmd, context.CancelFunc)
@@ -85,7 +90,7 @@ func (m model) results() []searchResult {
 			}
 			seen[item.ID] = true
 		}
-		text := strings.ToLower(item.Title + " " + item.Description + " " + item.Command)
+		text := strings.ToLower(item.Title + " " + item.Description + " " + item.Status + " " + item.Command)
 		if !strings.Contains(text, query) {
 			continue
 		}
@@ -122,11 +127,15 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.account = "Not verified · dcs login / dcs whoami"
 		}
+	case loadingTickMsg:
+		if msg.generation == m.generation && m.pending {
+			m.loading = true
+		}
 	case loadedMsg:
 		if msg.generation != m.generation {
 			return m, nil
 		}
-		m.loading, m.err, m.cancelLoad = false, msg.err, nil
+		m.pending, m.loading, m.err, m.cancelLoad = false, false, msg.err, nil
 		if msg.err == nil {
 			m.current = msg.item
 			m.cursor = min(m.cursor, max(0, len(m.results())-1))
@@ -212,7 +221,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		results := m.results()
-		if !m.loading && len(results) > 0 {
+		if !m.pending && len(results) > 0 {
 			return m.open(results[m.cursor].item)
 		}
 	}
@@ -259,7 +268,7 @@ func (m model) open(item Item) (tea.Model, tea.Cmd) {
 	if !item.CanOpen() {
 		return m, nil
 	}
-	previous := frameState{m.current, m.cursor, m.loading, m.err}
+	previous := frameState{m.current, m.cursor, m.pending, m.err}
 	remember := m.acknowledgeWelcome()
 	m.stopLoad()
 	m.history = append(append([]frameState(nil), m.history...), previous)
@@ -282,10 +291,11 @@ func (m *model) acknowledgeWelcome() tea.Cmd {
 
 func (m *model) load(req Request) tea.Cmd {
 	m.stopLoad()
-	m.loading, m.err = true, nil
-	command, cancel := m.fetch(req, m.generation)
+	m.pending, m.err = true, nil
+	generation := m.generation
+	command, cancel := m.fetch(req, generation)
 	m.cancelLoad = cancel
-	return command
+	return tea.Batch(command, tea.Tick(loadingDelay, func(time.Time) tea.Msg { return loadingTickMsg{generation} }))
 }
 
 func (m *model) stopLoad() {
@@ -294,7 +304,7 @@ func (m *model) stopLoad() {
 		m.cancelLoad = nil
 	}
 	m.generation++
-	m.loading = false
+	m.pending, m.loading = false, false
 }
 
 func (m *model) back() tea.Cmd {
@@ -305,7 +315,7 @@ func (m *model) back() tea.Cmd {
 		m.history = m.history[:len(m.history)-1]
 		m.current, m.cursor, m.query, m.err = previous.item, previous.cursor, nil, previous.err
 		m.cursor = min(m.cursor, max(0, len(m.results())-1))
-		if previous.loading && m.canRefresh() {
+		if previous.pending && m.canRefresh() {
 			return m.load(*m.current.Request)
 		}
 	}

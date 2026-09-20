@@ -24,6 +24,16 @@ type Request struct {
 
 type Field struct{ Label, Value string }
 
+// Labels whose value is a status word. The producer uses these so the
+// workspace can render the glyph without guessing from the value.
+const (
+	LabelStatus = "Status"
+	LabelSSL    = "SSL"
+)
+
+// IsStatus reports whether the field renders as glyph plus word.
+func (f Field) IsStatus() bool { return f.Label == LabelStatus || f.Label == LabelSSL }
+
 type logoRow struct{ upper, lower string }
 
 type logoSize struct{ width, height int }
@@ -34,11 +44,13 @@ type welcomeLayout struct {
 	headerAbove bool
 }
 
+// Status is the resource's state word; the subtitle leads with its glyph and
+// Description carries the rest ("hetzner · hel1").
 type Item struct {
-	ID, Title, Description, Command, Body string
-	Fields                                []Field
-	Children                              []Item
-	Request                               *Request
+	ID, Title, Description, Status, Command, Body string
+	Fields                                        []Field
+	Children                                      []Item
+	Request                                       *Request
 }
 
 func (i Item) CanOpen() bool {

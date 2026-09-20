@@ -4,23 +4,22 @@ import (
 	"errors"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // ErrNonInteractive is returned when a prompt is attempted in a non-interactive environment.
 var ErrNonInteractive = errors.New("this operation requires interactive input\n\n  Provide all required flags, or use --force to skip confirmations")
 
-// NewTheme returns a Huh form theme matching the DCS brand.
+// NewTheme returns a Huh form theme on the accent token. The focused button
+// keeps huh's own foreground so no color outside the palette is introduced.
 func NewTheme() *huh.Theme {
 	t := huh.ThemeCharm()
+	accent := Palette(mode).Accent
 
-	t.Focused.Title = t.Focused.Title.Foreground(BrandPrimary)
-	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(BrandPrimary)
-	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(BrandPrimary)
-	t.Focused.FocusedButton = t.Focused.FocusedButton.
-		Background(BrandPrimary).
-		Foreground(lipgloss.Color("#FFFFFF"))
-	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(BrandPrimary)
+	t.Focused.Title = t.Focused.Title.Foreground(accent)
+	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(accent)
+	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(accent)
+	t.Focused.FocusedButton = t.Focused.FocusedButton.Background(accent)
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(accent)
 
 	return t
 }

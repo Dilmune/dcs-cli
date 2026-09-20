@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,33 @@ func TestWhoami(t *testing.T) {
 	assert.Contains(t, out, "test@example.com")
 	assert.Contains(t, out, "Test User")
 	assert.Contains(t, out, "user-1")
+}
+
+func TestWhoamiFallsBackToEmailWhenNameIsEmpty(t *testing.T) {
+	api := newMockAPI()
+	api.on(http.MethodGet, client.PathAuthMe, http.StatusOK, map[string]any{
+		"user": map[string]string{"id": "user-1", "email": "test@example.com", "name": ""},
+	})
+	defer setupTest(t, api)()
+
+	cmd := newWhoamiCmd()
+	cmd.SetContext(context.Background())
+	var runErr error
+	out := captureStdout(t, func() { runErr = cmd.RunE(cmd, nil) })
+	require.NoError(t, runErr)
+
+	assert.Contains(t, out, "Name  test@example.com")
+	assert.Equal(t, 1, strings.Count(out, "test@example.com"), "the email is printed once, as the name")
+	assert.NotContains(t, out, "Email", "no separate email row when it already stands in for the name")
+	for _, line := range strings.Split(out, "\n") {
+		assert.NotEqual(t, "Name", strings.TrimSpace(line), "bare label printed: %q", line)
+	}
+}
+
+func TestAuthenticatedAs(t *testing.T) {
+	assert.Equal(t, "test@example.com", authenticatedAs(config.UserInfo{Email: "test@example.com"}))
+	assert.Equal(t, "test@example.com", authenticatedAs(config.UserInfo{Email: "test@example.com", Name: "  "}))
+	assert.Equal(t, "Test User (test@example.com)", authenticatedAs(config.UserInfo{Email: "test@example.com", Name: "Test User"}))
 }
 
 func TestWhoamiJSON(t *testing.T) {

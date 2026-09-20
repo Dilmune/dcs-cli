@@ -71,7 +71,9 @@ func TestUISourceReadsVerifiedAPIShapesAndPaginates(t *testing.T) {
 			case workspace.Sites:
 				require.Len(t, item.Children, 1)
 				assert.Equal(t, "node", fieldValue(item.Children[0].Fields, "Type"))
-				assert.Equal(t, "true", fieldValue(item.Children[0].Fields, "SSL enabled"))
+				assert.Equal(t, "active", fieldValue(item.Children[0].Fields, "SSL"))
+				assert.Equal(t, "active", item.Children[0].Status)
+				assert.Equal(t, "node", item.Children[0].Description, "the subtitle body no longer carries the status word")
 				assert.Equal(t, "main", fieldValue(item.Children[0].Fields, "Git branch"))
 			case workspace.ServerDetail:
 				assert.Equal(t, "2026-01-01T00:00:00Z", fieldValue(item.Fields, "Created"))
@@ -156,5 +158,7 @@ func TestUIResourceIDsAndPagination(t *testing.T) {
 	require.Len(t, item.Children, 2)
 	assert.Equal(t, 1, item.Children[0].Request.Page)
 	assert.Equal(t, 3, item.Children[1].Request.Page)
-	assert.Empty(t, fieldValue(uiSiteFields(uiSite{}), "SSL enabled"), "omitted SSL must not become false")
+	assert.Empty(t, fieldValue(uiSiteFields(uiSite{}), "SSL"), "omitted SSL must not become off")
+	off := false
+	assert.Equal(t, "off", fieldValue(uiSiteFields(uiSite{SSLEnabled: &off}), "SSL"))
 }

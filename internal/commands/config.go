@@ -56,7 +56,7 @@ func newConfigViewCmd() *cobra.Command {
 				ui.PrintKeyValue("API key", ui.Muted.Render("not set"))
 			}
 			if cfg.User != nil {
-				ui.PrintKeyValue("User", cfg.User.Email)
+				ui.PrintKeyValue("User", cfg.User.AccountLine())
 			}
 			if cfg.DefaultServerID != "" {
 				ui.PrintKeyValue("Default server", cfg.DefaultServerID)
