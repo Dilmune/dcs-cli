@@ -50,6 +50,11 @@ func newDaemonsCmd() *cobra.Command {
 	return cmd
 }
 
+const daemonStatusColumn = 2
+
+// COMMAND is free text and the only column that shrinks.
+var daemonListFixedColumns = []bool{true, false, true, true, true}
+
 func newDaemonListCmd() *cobra.Command {
 	var serverFlag string
 	cmd := &cobra.Command{
@@ -95,14 +100,14 @@ func newDaemonListCmd() *cobra.Command {
 				rows[i] = []string{
 					d.Name,
 					d.Command,
-					ui.StatusColor(d.Status).Render(d.Status),
+					d.Status,
 					strconv.Itoa(d.NumProcs),
 					d.RunAsUser,
 				}
 			}
 
 			fmt.Println()
-			ui.PrintTable(headers, rows)
+			ui.PrintTableFixed(headers, ui.WithStatusColumns(rows, daemonStatusColumn), daemonListFixedColumns)
 			return nil
 		},
 	}

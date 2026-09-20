@@ -87,7 +87,7 @@ func newLoginCmd() *cobra.Command {
 				return fmt.Errorf("save config: %w", err)
 			}
 
-			ui.PrintSuccess(fmt.Sprintf("Authenticated as %s (%s)", ui.Bold.Render(user.Name), user.Email))
+			ui.PrintSuccess("Authenticated as " + authenticatedAs(*user))
 			return nil
 		},
 	}
@@ -168,8 +168,10 @@ func newWhoamiCmd() *cobra.Command {
 			}
 
 			ui.PrintSection("Account")
-			ui.PrintKeyValue("Name", user.Name)
-			ui.PrintKeyValue("Email", user.Email)
+			ui.PrintKeyValue("Name", user.DisplayName())
+			if user.HasDisplayName() {
+				ui.PrintKeyValue("Email", user.Email)
+			}
 			ui.PrintKeyValue("ID", user.ID)
 			ui.PrintKeyValue("API", cfg.APIURL)
 			fmt.Println()
@@ -189,6 +191,13 @@ func decodeAuthenticatedUser(resp *client.APIResponse) (*config.UserInfo, error)
 		return nil, fmt.Errorf("authentication response is missing user identity")
 	}
 	return &me.User, nil
+}
+
+func authenticatedAs(user config.UserInfo) string {
+	if user.HasDisplayName() {
+		return fmt.Sprintf("%s (%s)", ui.Bold.Render(user.Name), user.Email)
+	}
+	return ui.Bold.Render(user.Email)
 }
 
 func hasAuthenticatedIdentity(user config.UserInfo) bool {

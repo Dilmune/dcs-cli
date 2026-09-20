@@ -3,11 +3,13 @@ package ui
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
+
+const spinnerFrameInterval = 80 * time.Millisecond
 
 type spinnerModel struct {
 	spinner spinner.Model
@@ -19,8 +21,8 @@ type spinnerDoneMsg struct{}
 
 func newSpinnerModel(message string) spinnerModel {
 	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(BrandPrimary)
+	s.Spinner = spinner.Spinner{Frames: spinner.Dot.Frames, FPS: spinnerFrameInterval}
+	s.Style = Accent
 	return spinnerModel{
 		spinner: s,
 		message: message,

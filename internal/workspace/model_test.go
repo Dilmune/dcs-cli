@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -34,6 +35,36 @@ func testModel() model {
 		}, func() {}
 	}
 	return m
+}
+
+// settle runs a command, expanding batches, and returns every message it
+// produced; ticks are waited out so the caller sees them as the program would.
+func settle(t *testing.T, command tea.Cmd) []tea.Msg {
+	t.Helper()
+	require.NotNil(t, command)
+	msg := command()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var messages []tea.Msg
+	for _, sub := range batch {
+		if sub != nil {
+			messages = append(messages, settle(t, sub)...)
+		}
+	}
+	return messages
+}
+
+func loadedFrom(t *testing.T, command tea.Cmd) loadedMsg {
+	t.Helper()
+	for _, msg := range settle(t, command) {
+		if loaded, ok := msg.(loadedMsg); ok {
+			return loaded
+		}
+	}
+	t.Fatal("command produced no loadedMsg")
+	return loadedMsg{}
 }
 
 func press(m model, key tea.KeyType, runes ...rune) (model, tea.Cmd) {
@@ -161,9 +192,9 @@ func TestWorkspaceLoadsRefreshesAndCancelsStaleResults(t *testing.T) {
 	m := testModel()
 	m, _ = press(m, tea.KeyRunes, '1')
 	m, command := press(m, tea.KeyEnter)
-	require.True(t, m.loading)
+	require.True(t, m.pending)
 	require.NotNil(t, command)
-	oldMessage := command()
+	oldMessage := loadedFrom(t, command)
 	canceled := false
 	m.cancelLoad = func() { canceled = true }
 	m, _ = press(m, tea.KeyEsc)
@@ -172,17 +203,68 @@ func TestWorkspaceLoadsRefreshesAndCancelsStaleResults(t *testing.T) {
 	m = next.(model)
 	assert.Equal(t, "Servers", m.current.Title)
 	m, command = press(m, tea.KeyEnter)
-	next, _ = m.Update(command())
+	next, _ = m.Update(loadedFrom(t, command))
 	m = next.(model)
-	assert.False(t, m.loading)
+	assert.False(t, m.pending)
 	assert.Equal(t, "Fixture server", m.current.Children[0].Title)
 	m, command = press(m, tea.KeyRunes, 'r')
-	assert.True(t, m.loading, "refresh must return the modified model, not its old value")
+	assert.True(t, m.pending, "refresh must return the modified model, not its old value")
 	require.NotNil(t, command)
 	m, _ = press(m, tea.KeyRunes, '4')
 	m, command = press(m, tea.KeyEsc)
-	assert.True(t, m.loading, "returning to a pending view restarts its canceled read")
+	assert.True(t, m.pending, "returning to a pending view restarts its canceled read")
 	require.NotNil(t, command)
+}
+
+func TestWorkspaceLoadingIndicatorWaitsForSlowReadsOnly(t *testing.T) {
+	m := testModel()
+	m, _ = press(m, tea.KeyRunes, '1')
+	// The tick's timer starts inside load(), so the clock must start before Enter.
+	started := time.Now()
+	m, command := press(m, tea.KeyEnter)
+	require.True(t, m.pending)
+	assert.False(t, m.loading, "a read that just started has nothing to show yet")
+	assert.NotContains(t, m.View(), "Loading...")
+
+	messages := settle(t, command)
+	var loaded loadedMsg
+	var tick loadingTickMsg
+	for _, msg := range messages {
+		switch typed := msg.(type) {
+		case loadedMsg:
+			loaded = typed
+		case loadingTickMsg:
+			tick = typed
+		}
+	}
+	require.NotZero(t, loaded.item.ID)
+	require.Equal(t, m.generation, tick.generation)
+	assert.GreaterOrEqual(t, time.Since(started), loadingDelay, "the indicator tick fires no earlier than 150ms")
+
+	fast, _ := m.Update(loaded)
+	fast, _ = fast.(model).Update(tick)
+	fastModel := fast.(model)
+	assert.False(t, fastModel.pending)
+	assert.False(t, fastModel.loading, "a tick landing after the read finished must not light the indicator")
+	assert.NotContains(t, fastModel.View(), "Loading...")
+	assert.Equal(t, "Fixture server", fastModel.current.Children[0].Title)
+
+	slow, _ := m.Update(tick)
+	slowModel := slow.(model)
+	assert.True(t, slowModel.loading, "a read still pending when the tick fires shows the indicator")
+	assert.Contains(t, slowModel.View(), "Loading...")
+	assert.Contains(t, slowModel.footer(), "esc cancel request")
+	slow, _ = slowModel.Update(loaded)
+	slowModel = slow.(model)
+	assert.False(t, slowModel.loading)
+	assert.NotContains(t, slowModel.View(), "Loading...")
+
+	canceledModel, _ := press(m, tea.KeyEsc)
+	canceled, _ := canceledModel.Update(tick)
+	canceledModel = canceled.(model)
+	assert.False(t, canceledModel.pending)
+	assert.False(t, canceledModel.loading, "a tick from a canceled read must not light the indicator")
+	assert.NotContains(t, canceledModel.View(), "Loading...")
 }
 
 func TestWorkspaceFirstRunOpensDirectlyAndRemembersOnlyOnNavigation(t *testing.T) {

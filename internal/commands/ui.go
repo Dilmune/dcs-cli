@@ -9,12 +9,12 @@ import (
 
 	"github.com/dilmune/dcs-cli/internal/client"
 	"github.com/dilmune/dcs-cli/internal/config"
+	"github.com/dilmune/dcs-cli/internal/ui"
 	"github.com/dilmune/dcs-cli/internal/workspace"
 )
 
 func newUICmd() *cobra.Command {
 	var welcome bool
-	var theme string
 	cmd := &cobra.Command{
 		Use:   "ui",
 		Short: "Open the interactive cloud workspace",
@@ -23,7 +23,7 @@ func newUICmd() *cobra.Command {
 		// Do not inherit credential loading or asynchronous version output before
 		// validating the terminal. Those hooks belong to the ordinary CLI.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			if err := validateUIFlags(cmd, theme); err != nil {
+			if err := validateUIFlags(cmd); err != nil {
 				return fmt.Errorf("open workspace: %w", err)
 			}
 			if !hasUITerminal(cmd) {
@@ -49,6 +49,10 @@ func newUICmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("read color preference: %w", err)
 			}
+			theme, err := cmd.Flags().GetString("theme")
+			if err != nil {
+				return fmt.Errorf("read theme preference: %w", err)
+			}
 			if err := workspace.Run(cmd.Context(), workspace.Options{
 				Input: cmd.InOrStdin(), Output: cmd.OutOrStdout(), Catalog: uiCatalog(cmd.Root()),
 				Source: &uiSource{api: api}, ShowWelcome: welcome || !seen,
@@ -61,11 +65,10 @@ func newUICmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&welcome, "welcome", false, "Show the first-run cube on the workspace overview")
-	cmd.Flags().StringVar(&theme, "theme", "auto", "Terminal accents: auto, light, dim, dark")
 	return cmd
 }
 
-func validateUIFlags(cmd *cobra.Command, theme string) error {
+func validateUIFlags(cmd *cobra.Command) error {
 	for _, name := range []string{"json", "quiet", "debug"} {
 		enabled, err := cmd.Flags().GetBool(name)
 		if err != nil {
@@ -82,8 +85,16 @@ func validateUIFlags(cmd *cobra.Command, theme string) error {
 	if format != "" {
 		return fmt.Errorf("--output cannot be combined with dcs ui; use an ordinary command instead")
 	}
-	switch theme {
-	case "auto", "light", "dim", "dark":
+	theme, err := cmd.Flags().GetString("theme")
+	if err != nil {
+		return fmt.Errorf("read --theme: %w", err)
+	}
+	return validateTheme(theme)
+}
+
+func validateTheme(theme string) error {
+	switch ui.Mode(theme) {
+	case ui.ModeAuto, ui.ModeLight, ui.ModeDim, ui.ModeDark:
 		return nil
 	default:
 		return fmt.Errorf("unknown UI theme %q; use auto, light, dim, or dark", theme)

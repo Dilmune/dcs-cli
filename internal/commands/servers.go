@@ -112,6 +112,11 @@ func newServersCmd() *cobra.Command {
 	return cmd
 }
 
+// Only NAME and SIZE may shrink; the other columns have a known shape.
+var serverListFixedColumns = []bool{false, true, true, true, false, true}
+
+const serverStatusColumn = 1
+
 func newServersListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "list",
@@ -137,8 +142,7 @@ func newServersListCmd() *cobra.Command {
 			headers := []string{"Name", "Status", "Provider", "Region", "Size", "IPv4"}
 			rows := make([][]string, len(servers))
 			for i, s := range servers {
-				status := ui.StatusColor(s.Status).Render(s.Status)
-				rows[i] = []string{s.Name, status, s.Provider, s.Region, s.displaySize(), s.IPv4}
+				rows[i] = []string{s.Name, s.Status, s.Provider, s.Region, s.displaySize(), s.IPv4}
 			}
 
 			if ui.PrintFormatted(resp.Data, headers, rows) {
@@ -153,7 +157,7 @@ func newServersListCmd() *cobra.Command {
 			}
 
 			fmt.Println()
-			ui.PrintTable(headers, rows)
+			ui.PrintTableFixed(headers, ui.WithStatusColumns(rows, serverStatusColumn), serverListFixedColumns)
 			return nil
 		},
 	}
@@ -393,7 +397,7 @@ func newServersInfoCmd() *cobra.Command {
 
 			ui.PrintSection(detail.Name)
 			ui.PrintKeyValue("ID", detail.ID)
-			ui.PrintKeyValue("Status", ui.StatusColor(detail.Status).Render(detail.Status))
+			ui.PrintKeyValue("Status", ui.Status(detail.Status))
 			ui.PrintKeyValue("Provider", detail.Provider)
 			ui.PrintKeyValue("Region", detail.Region)
 			ui.PrintKeyValue("Size", detail.displaySize())
@@ -626,7 +630,7 @@ func newServersEventsCmd() *cobra.Command {
 				case "progress":
 					icon = ui.Warning.Render("●")
 				}
-				fmt.Printf("  %s %s  %s\n", icon, ui.Dim.Render(e.CreatedAt), e.Message)
+				fmt.Printf("  %s %s  %s\n", icon, e.CreatedAt, e.Message)
 			}
 			fmt.Println()
 			return nil

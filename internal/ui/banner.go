@@ -23,6 +23,7 @@ const (
 	bannerFullMinWidth    = 60
 	bannerCompactMinWidth = 40
 	dividerMaxWidth       = 48
+	commandColumnWidth    = 16
 )
 
 func PrintBanner(version string) {
@@ -34,7 +35,7 @@ func PrintBanner(version string) {
 	}
 
 	width := terminalWidth()
-	noColor := isNoColor()
+	noColor := plain || isNoColor()
 
 	switch {
 	case width < bannerCompactMinWidth:
@@ -47,9 +48,9 @@ func PrintBanner(version string) {
 }
 
 func printCompactBanner(version string, noColor bool) {
-	dcsStyle := lipgloss.NewStyle().Foreground(BrandPrimary).Bold(true)
-	nameStyle := lipgloss.NewStyle().Foreground(TextMuted)
-	verStyle := lipgloss.NewStyle().Foreground(TextDim)
+	dcsStyle := Accent.Bold(true)
+	nameStyle := Muted
+	verStyle := Muted
 	fmt.Printf("  %s  %s  %s\n",
 		styled(dcsStyle, "DCS", noColor),
 		styled(nameStyle, "Dilmune Cloud Services", noColor),
@@ -57,10 +58,10 @@ func printCompactBanner(version string, noColor bool) {
 }
 
 func printFullBanner(version string, noColor bool) {
-	nameStyle := lipgloss.NewStyle().Foreground(TextWhite).Bold(true)
-	taglineStyle := lipgloss.NewStyle().Foreground(TextMuted).Italic(true)
-	versionStyle := lipgloss.NewStyle().Foreground(TextDim)
-	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#3a3a4a"))
+	nameStyle := Bold
+	taglineStyle := Muted.Italic(true)
+	versionStyle := Muted
+	lineStyle := Divider
 
 	fmt.Println()
 
@@ -168,15 +169,10 @@ func terminalWidth() int {
 	return w
 }
 
+// isCINoColor skips the banner entirely in CI; isNoColor (theme.go) covers the
+// interactive case where NO_COLOR must still suppress color per no-color.org.
 func isCINoColor() bool {
-	return os.Getenv("NO_COLOR") != "" && !IsTerminal()
-}
-
-// isNoColor honors NO_COLOR regardless of TTY, per https://no-color.org: a
-// non-empty value must suppress color even in an interactive terminal, which
-// isCINoColor (used only to skip the banner entirely in CI) does not cover.
-func isNoColor() bool {
-	return os.Getenv("NO_COLOR") != ""
+	return isNoColor() && !IsTerminal()
 }
 
 func PrintCommands() {
@@ -184,11 +180,11 @@ func PrintCommands() {
 		return
 	}
 
-	headerStyle := lipgloss.NewStyle().Foreground(TextWhite).Bold(true)
-	cmdStyle := lipgloss.NewStyle().Foreground(BrandPrimary).Bold(true).Width(16)
-	descStyle := lipgloss.NewStyle().Foreground(TextMuted)
-	sectionStyle := lipgloss.NewStyle().Foreground(TextDim).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(TextDim)
+	headerStyle := Bold
+	cmdStyle := Accent.Bold(true).Width(commandColumnWidth)
+	descStyle := Muted
+	sectionStyle := Bold
+	hintStyle := Muted
 
 	fmt.Println(headerStyle.Render("  COMMANDS"))
 	fmt.Println()

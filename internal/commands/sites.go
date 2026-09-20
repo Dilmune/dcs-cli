@@ -107,6 +107,14 @@ func newSitesCmd() *cobra.Command {
 	return cmd
 }
 
+// Only DOMAIN may shrink; TYPE, STATUS, SSL and GIT BRANCH have a known shape.
+var siteListFixedColumns = []bool{false, true, true, true, true}
+
+const (
+	siteStatusColumn = 2
+	siteSSLColumn    = 3
+)
+
 func newSitesListCmd() *cobra.Command {
 	var serverFlag string
 	cmd := &cobra.Command{
@@ -137,17 +145,11 @@ func newSitesListCmd() *cobra.Command {
 			headers := []string{"Domain", "Type", "Status", "SSL", "Git Branch"}
 			rows := make([][]string, len(sites))
 			for i, s := range sites {
-				ssl := ui.Muted.Render("off")
+				ssl := ui.StatusOff
 				if s.SSLEnabled {
-					ssl = ui.Success.Render(ui.StatusActive)
+					ssl = ui.StatusActive
 				}
-				rows[i] = []string{
-					s.Domain,
-					s.ProjectType,
-					ui.StatusColor(s.Status).Render(s.Status),
-					ssl,
-					s.GitBranch,
-				}
+				rows[i] = []string{s.Domain, s.ProjectType, s.Status, ssl, s.GitBranch}
 			}
 
 			if ui.PrintFormatted(resp.Data, headers, rows) {
@@ -162,7 +164,7 @@ func newSitesListCmd() *cobra.Command {
 			}
 
 			fmt.Println()
-			ui.PrintTable(headers, rows)
+			ui.PrintTableFixed(headers, ui.WithStatusColumns(rows, siteStatusColumn, siteSSLColumn), siteListFixedColumns)
 			return nil
 		},
 	}
@@ -330,7 +332,7 @@ func newSitesInfoCmd() *cobra.Command {
 				return fmt.Errorf("decode response: %w", err)
 			}
 
-			ssl := "disabled"
+			ssl := ui.StatusOff
 			if detail.SSLEnabled {
 				ssl = ui.StatusActive
 			}
@@ -338,8 +340,8 @@ func newSitesInfoCmd() *cobra.Command {
 			ui.PrintSection(detail.Domain)
 			ui.PrintKeyValue("ID", detail.ID)
 			ui.PrintKeyValue("Type", detail.ProjectType)
-			ui.PrintKeyValue("Status", ui.StatusColor(detail.Status).Render(detail.Status))
-			ui.PrintKeyValue("SSL", ssl)
+			ui.PrintKeyValue("Status", ui.Status(detail.Status))
+			ui.PrintKeyValue("SSL", ui.Status(ssl))
 			if detail.GitRepo != "" {
 				ui.PrintKeyValue("Repository", detail.GitRepo)
 				ui.PrintKeyValue("Branch", detail.GitBranch)
@@ -504,6 +506,11 @@ func newSitesDeployCmd() *cobra.Command {
 	return cmd
 }
 
+const deploymentStatusColumn = 1
+
+// Every deployment column has a known shape; none shrinks.
+var deploymentListFixedColumns = []bool{true, true, true, true, true}
+
 func newSitesDeploymentsCmd() *cobra.Command {
 	var serverFlag string
 	cmd := &cobra.Command{
@@ -557,7 +564,7 @@ func newSitesDeploymentsCmd() *cobra.Command {
 				}
 				rows[i] = []string{
 					d.ID[:8],
-					ui.StatusColor(d.Status).Render(d.Status),
+					d.Status,
 					sha,
 					d.Trigger,
 					d.CreatedAt,
@@ -565,7 +572,7 @@ func newSitesDeploymentsCmd() *cobra.Command {
 			}
 
 			fmt.Println()
-			ui.PrintTable(headers, rows)
+			ui.PrintTableFixed(headers, ui.WithStatusColumns(rows, deploymentStatusColumn), deploymentListFixedColumns)
 			return nil
 		},
 	}
@@ -740,7 +747,7 @@ func newSitesLogsCmd() *cobra.Command {
 
 			fmt.Println()
 			for _, l := range logs.Lines {
-				fmt.Printf("  %s  %s\n", ui.Dim.Render(l.Timestamp), l.Line)
+				fmt.Printf("  %s  %s\n", l.Timestamp, l.Line)
 			}
 			fmt.Println()
 			return nil

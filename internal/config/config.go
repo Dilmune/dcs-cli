@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const DefaultAPIURL = "https://api.dilmune.com"
@@ -13,6 +14,30 @@ type UserInfo struct {
 	ID    string `json:"id"`
 	Email string `json:"email"`
 	Name  string `json:"name"`
+}
+
+const accountSeparator = " · "
+
+func (u UserInfo) HasDisplayName() bool {
+	return strings.TrimSpace(u.Name) != ""
+}
+
+// DisplayName is what every surface prints as the account's name; the API
+// leaves Name empty for accounts that never set one, so the email stands in.
+func (u UserInfo) DisplayName() string {
+	if u.HasDisplayName() {
+		return u.Name
+	}
+	return u.Email
+}
+
+// AccountLine is the one-line identity shown where there is no room for
+// separate name and email rows.
+func (u UserInfo) AccountLine() string {
+	if u.HasDisplayName() {
+		return u.Name + accountSeparator + u.Email
+	}
+	return u.Email
 }
 
 type ProjectConfig struct {

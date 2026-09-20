@@ -1,30 +1,22 @@
 package workspace
 
 import (
-	"fmt"
 	"io"
-	"math"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+
+	"github.com/dilmune/dcs-cli/internal/ui"
 )
 
 type styles struct {
-	title, muted, accent, rule, logoFace, logoSide, logoAccent lipgloss.Style
-	asciiLogo                                                  bool
+	title, muted, accent, rule, success, warning, danger lipgloss.Style
+	logoFace, logoSide, logoAccent                       lipgloss.Style
+	asciiLogo                                            bool
 }
 
-const (
-	logoCreamANSI256      = "230"
-	logoCreamANSI         = "15"
-	logoShadeANSI256      = "223"
-	logoShadeANSI         = "7"
-	logoTerracottaANSI256 = "173"
-	logoTerracottaANSI    = "9"
-)
-
-// Semantic OKLCH tokens shared with Dilmune's design system. Conversion lives
-// at the terminal boundary; the user's background and body color stay intact.
+// Colors come from the ui token table; the workspace owns nothing but the
+// logo palette. The user's background and body color stay intact.
 func newStyles(out io.Writer, theme string, plain bool) styles {
 	r := lipgloss.NewRenderer(out)
 	if plain {
@@ -39,37 +31,60 @@ func newStyles(out io.Writer, theme string, plain bool) styles {
 }
 
 func workspaceStyles(r *lipgloss.Renderer, theme string, dark bool) styles {
-	primaryInk, muted, border := oklch(.47, .16, 35), oklch(.5, .012, 260), oklch(.9, .008, 80)
+	mode := ui.ModeLight
 	if dark {
-		primaryInk, muted, border = oklch(.705, .16, 35), oklch(.6, .01, 260), oklch(.26, .008, 260)
-	} else if theme == "dim" {
-		primaryInk, muted, border = oklch(.435, .17, 30), oklch(.44, .015, 50), oklch(.84, .025, 75)
+		mode = ui.ModeDark
+	} else if theme == string(ui.ModeDim) {
+		mode = ui.ModeDim
 	}
+	t := ui.Palette(mode)
 	b := r.NewStyle()
-	// The approved asset uses this fixed terminal palette, independent of menu
-	// theme. RGB values match its 256-color cells exactly, avoiding quantization.
-	face := lipgloss.CompleteColor{TrueColor: "#ffffd7", ANSI256: logoCreamANSI256, ANSI: logoCreamANSI}
-	side := lipgloss.CompleteColor{TrueColor: "#ffd7af", ANSI256: logoShadeANSI256, ANSI: logoShadeANSI}
-	terracotta := lipgloss.CompleteColor{TrueColor: "#d7875f", ANSI256: logoTerracottaANSI256, ANSI: logoTerracottaANSI}
-	return styles{title: b.Bold(true), muted: b.Foreground(muted), accent: b.Foreground(primaryInk), rule: b.Foreground(border),
+	face, side, terracotta := logoPalette()
+	return styles{title: b.Bold(true), muted: b.Foreground(t.Muted), accent: b.Foreground(t.Accent), rule: b.Foreground(t.Divider),
+		success: b.Foreground(t.Success), warning: b.Foreground(t.Warning), danger: b.Foreground(t.Danger),
 		logoFace: b.Foreground(face), logoSide: b.Foreground(side), logoAccent: b.Foreground(terracotta), asciiLogo: r.ColorProfile() == termenv.Ascii}
 }
 
-func oklch(l, c, h float64) lipgloss.Color {
-	h *= math.Pi / 180
-	a, b := c*math.Cos(h), c*math.Sin(h)
-	x := math.Pow(l+.3963377774*a+.2158037573*b, 3)
-	y := math.Pow(l-.1055613458*a-.0638541728*b, 3)
-	z := math.Pow(l-.0894841775*a-1.291485548*b, 3)
-	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", srgb(4.0767416621*x-3.3077115913*y+.2309699292*z),
-		srgb(-1.2684380046*x+2.6097574011*y-.3413193965*z), srgb(-.0041960863*x-.7034186147*y+1.707614701*z)))
+// status renders glyph plus word in the workspace's own renderer so the mode
+// chosen in newStyles applies; ui.Status would use the process-wide styles.
+func (s styles) status(word string) string {
+	if word == "" {
+		return ""
+	}
+	glyph, tone := ui.StatusGlyph(word)
+	return s.tone(tone).Render(glyph + " " + word)
 }
 
-func srgb(v float64) int {
-	if v <= .0031308 {
-		v *= 12.92
-	} else {
-		v = 1.055*math.Pow(v, 1/2.4) - .055
+func (s styles) tone(tone ui.Tone) lipgloss.Style {
+	switch tone {
+	case ui.ToneSuccess:
+		return s.success
+	case ui.ToneWarning:
+		return s.warning
+	case ui.ToneDanger:
+		return s.danger
+	default:
+		return s.muted
 	}
-	return int(math.Round(max(0, min(1, v)) * 255))
+}
+
+// keyValue follows the plain-output rule: muted label right-aligned in the
+// 12-cell column, two spaces, unstyled value. Empty values return "".
+func (s styles) keyValue(f Field) string {
+	value := f.Value
+	if f.IsStatus() {
+		value = s.status(value)
+	}
+	return ui.FormatKeyValue(f.Label, value, s.muted)
+}
+
+// subtitle is the muted line under a title: "● active · hetzner · hel1".
+func (s styles) subtitle(item Item) string {
+	if item.Status == "" {
+		return s.muted.Render(item.Description)
+	}
+	if item.Description == "" {
+		return s.status(item.Status)
+	}
+	return s.status(item.Status) + s.muted.Render(" · "+item.Description)
 }

@@ -41,7 +41,7 @@ func PrintJSONRaw(data json.RawMessage) {
 	}
 }
 
-// PrintSuccess prints a green success message.
+// PrintSuccess prints a success line in the success token.
 func PrintSuccess(message string) {
 	if quiet {
 		return
@@ -49,12 +49,12 @@ func PrintSuccess(message string) {
 	fmt.Printf("\n  %s %s\n\n", Success.Render("✓"), message)
 }
 
-// PrintError prints a red error message to stderr. Never suppressed.
+// PrintError prints an error line to stderr in the danger token. Never suppressed.
 func PrintError(err error) {
 	fmt.Fprintf(os.Stderr, "\n  %s %s\n\n", Error.Render("✗"), err.Error())
 }
 
-// PrintWarning prints a yellow warning message.
+// PrintWarning prints a warning line in the warning token.
 func PrintWarning(message string) {
 	if quiet {
 		return
@@ -62,7 +62,7 @@ func PrintWarning(message string) {
 	fmt.Printf("  %s %s\n", Warning.Render("!"), message)
 }
 
-// PrintInfo prints a blue info message.
+// PrintInfo prints an informational line; the glyph uses the muted token.
 func PrintInfo(message string) {
 	if quiet {
 		return

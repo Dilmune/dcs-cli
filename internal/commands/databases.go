@@ -113,6 +113,17 @@ func newDatabasesCmd() *cobra.Command {
 	return cmd
 }
 
+const (
+	databaseStatusColumn = 2
+	backupStatusColumn   = 1
+)
+
+// Only NAME may shrink in the database list; every backup column has a known shape.
+var (
+	databaseListFixedColumns = []bool{false, true, true, true}
+	backupListFixedColumns   = []bool{true, true, true, true, true}
+)
+
 func newDBListCmd() *cobra.Command {
 	var serverFlag string
 	cmd := &cobra.Command{
@@ -146,7 +157,7 @@ func newDBListCmd() *cobra.Command {
 				rows[i] = []string{
 					d.Name,
 					d.Type,
-					ui.StatusColor(d.Status).Render(d.Status),
+					d.Status,
 					d.CreatedAt,
 				}
 			}
@@ -163,7 +174,7 @@ func newDBListCmd() *cobra.Command {
 			}
 
 			fmt.Println()
-			ui.PrintTable(headers, rows)
+			ui.PrintTableFixed(headers, ui.WithStatusColumns(rows, databaseStatusColumn), databaseListFixedColumns)
 			return nil
 		},
 	}
@@ -525,7 +536,7 @@ func newDBBackupsCmd() *cobra.Command {
 				}
 				rows[i] = []string{
 					id,
-					ui.StatusColor(b.Status).Render(b.Status),
+					b.Status,
 					formatBytes(b.SizeBytes),
 					b.CompletedAt,
 					b.CreatedAt,
@@ -533,7 +544,7 @@ func newDBBackupsCmd() *cobra.Command {
 			}
 
 			fmt.Println()
-			ui.PrintTable(headers, rows)
+			ui.PrintTableFixed(headers, ui.WithStatusColumns(rows, backupStatusColumn), backupListFixedColumns)
 			return nil
 		},
 	}

@@ -117,3 +117,22 @@ func TestLoadProjectConfig_NotFound(t *testing.T) {
 	_, err := LoadProjectConfig(t.TempDir())
 	assert.Error(t, err)
 }
+
+func TestUserInfoDisplayNameFallsBackToEmail(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		user          UserInfo
+		hasName       bool
+		display, line string
+	}{
+		{"named", UserInfo{Name: "Test User", Email: "test@example.com"}, true, "Test User", "Test User · test@example.com"},
+		{"empty name", UserInfo{Email: "test@example.com"}, false, "test@example.com", "test@example.com"},
+		{"blank name", UserInfo{Name: "  ", Email: "test@example.com"}, false, "test@example.com", "test@example.com"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.hasName, tt.user.HasDisplayName())
+			assert.Equal(t, tt.display, tt.user.DisplayName())
+			assert.Equal(t, tt.line, tt.user.AccountLine())
+		})
+	}
+}
