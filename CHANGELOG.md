@@ -1,5 +1,17 @@
 # DCS CLI changes
 
+## 3.8.2 (2026-09-21)
+
+### Workspace refinements
+
+- Reference areas behave the same. Databases and Storage now list every
+  subcommand at the first level, the way Operations always did, with the
+  parent command's own help first.
+- Choosing a server for sites reads as a picker. Its title and description say
+  what you are choosing, and each server shows only provider, region and IPv4.
+- Long values under a label wrap with a hanging indent, so continuation lines
+  sit under the value column instead of returning to the left edge.
+
 ## 3.8.1 (2026-09-20)
 
 ### One voice in the terminal

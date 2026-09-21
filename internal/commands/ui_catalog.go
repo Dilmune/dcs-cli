@@ -18,7 +18,7 @@ func uiCatalog(root *cobra.Command) workspace.Item {
 				}
 			}
 		}
-		return item
+		return promoteSingleCommand(item)
 	}
 	servers := area(workspace.AreaServers, "Servers", "Live views and SSH commands", "servers", "ssh")
 	servers.Children = append([]workspace.Item{{ID: "live-servers", Title: "Your servers", Description: "Read the current server list from Dilmune Cloud.", Request: &workspace.Request{Kind: workspace.Servers}}}, servers.Children...)
@@ -31,6 +31,21 @@ func uiCatalog(root *cobra.Command) workspace.Item {
 		area("access", "Access", "Reference: keys and account", "keys", "api-keys", "login", "whoami", "logout"),
 		area("operations", "Operations", "Reference: logs, environment, processes", "logs", "env", "firewall", "cron", "daemon", "software", "status", "config", "open"),
 	}}
+}
+
+// An area built from one parent command (Databases, Storage) would otherwise
+// show a single entry and hide its subcommands behind a second Enter, while
+// Operations lists its commands directly. Lift the subcommands to the area's
+// first level and keep the parent guide first so its own help stays reachable.
+func promoteSingleCommand(area workspace.Item) workspace.Item {
+	if len(area.Children) != 1 || len(area.Children[0].Children) == 0 {
+		return area
+	}
+	parent := area.Children[0]
+	subcommands := parent.Children
+	parent.Children = nil
+	area.Children = append([]workspace.Item{parent}, subcommands...)
+	return area
 }
 
 // Derive references from Cobra so this workspace cannot invent a second CLI.

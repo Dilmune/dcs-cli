@@ -34,7 +34,7 @@ func PrintBanner(version string) {
 		return
 	}
 
-	width := terminalWidth()
+	width := TerminalWidth()
 	noColor := plain || isNoColor()
 
 	switch {
@@ -161,7 +161,9 @@ func hexByte(c byte) byte {
 	}
 }
 
-func terminalWidth() int {
+// TerminalWidth is the stdout column count for layout, 80 when stdout is
+// not a terminal.
+func TerminalWidth() int {
 	w, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil || w <= 0 {
 		return 80

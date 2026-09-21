@@ -177,9 +177,7 @@ func (m model) listView(width, capacity int) []string {
 	right = append(right, "", m.styles.muted.Render("Enter to explore"))
 	fields := len(right)
 	for _, f := range selected.Fields {
-		if line := m.styles.keyValue(f); line != "" {
-			right = append(right, line)
-		}
+		right = append(right, m.styles.keyValueLines(f, rightWidth)...)
 	}
 	if len(right) > fields {
 		right = append(right[:fields], append([]string{""}, right[fields:]...)...)
@@ -204,9 +202,7 @@ func (m model) listView(width, capacity int) []string {
 func (m model) detailView(item Item, width int) []string {
 	var lines []string
 	for _, f := range item.Fields {
-		if line := m.styles.keyValue(f); line != "" {
-			lines = append(lines, wrap(line, width)...)
-		}
+		lines = append(lines, m.styles.keyValueLines(f, width)...)
 	}
 	if len(lines) > 0 {
 		lines = append(lines, "")

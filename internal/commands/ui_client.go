@@ -98,20 +98,34 @@ func (s *uiSource) servers(ctx context.Context, req workspace.Request) (workspac
 	}
 	item := workspace.Item{ID: "live-servers", Title: "Your servers", Description: "Select a server to view its details.", Body: "No servers on this page. Create one with dcs servers create."}
 	if req.Kind == workspace.SiteServers {
-		item.ID, item.Title, item.Description = "live-sites", "Choose a server", "Select a server to browse its sites."
+		item.ID, item.Title, item.Description = "live-sites", "Choose a server", uiSitePickerDescription
 	}
 	for _, server := range servers {
 		if !validUIResourceID(server.ID) {
 			return workspace.Item{}, fmt.Errorf("server response contains an invalid ID")
 		}
-		next := workspace.Request{Kind: workspace.ServerDetail, ServerID: server.ID}
 		if req.Kind == workspace.SiteServers {
-			next.Kind = workspace.Sites
+			item.Children = append(item.Children, uiSitePickerEntry(server))
+			continue
 		}
+		next := workspace.Request{Kind: workspace.ServerDetail, ServerID: server.ID}
 		item.Children = append(item.Children, workspace.Item{ID: server.ID, Title: firstUIText(server.Name, server.ID), Status: server.Status, Description: joinUIText(server.Provider, server.Region),
 			Fields: uiServerFields(server), Command: "dcs servers info -- " + workspace.Quote(server.ID), Request: &next})
 	}
 	return uiPaginate(item, resp.Meta, req), nil
+}
+
+const (
+	uiSitePickerDescription = "Pick the server whose sites you want to browse."
+)
+
+// The picker exists to choose a server for its sites, so it drops the server
+// command reference and the inspection fields that read like the Servers area.
+// The server list API carries no site count, so the purpose line is fixed.
+func uiSitePickerEntry(server uiServer) workspace.Item {
+	next := workspace.Request{Kind: workspace.Sites, ServerID: server.ID}
+	return workspace.Item{ID: server.ID, Title: firstUIText(server.Name, server.ID), Status: server.Status, Description: "",
+		Fields: presentUIFields([]workspace.Field{{Label: "Provider", Value: server.Provider}, {Label: "Region", Value: server.Region}, {Label: "IPv4", Value: server.IPv4}}), Request: &next}
 }
 
 func (s *uiSource) sites(ctx context.Context, req workspace.Request) (workspace.Item, error) {

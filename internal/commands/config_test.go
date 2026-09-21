@@ -82,3 +82,28 @@ func TestConfigSetInvalidKey(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown config key")
 }
+
+func TestConfigView_APIKeyShowsPrefixAndEllipsisOnly(t *testing.T) {
+	api := newMockAPI()
+	cleanup := setupTest(t, api)
+	defer cleanup()
+
+	tests := []struct {
+		name, key, want string
+	}{
+		{"long key shows first 12 cells then the ellipsis", "dcs_live_0123456789abcdef", "     API key  dcs_live_012…"},
+		{"twelve-cell key is fully hidden", "test-key-123", "     API key  ***"},
+		{"short key is fully hidden", "short", "     API key  ***"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg.APIKey = tc.key
+			cmd := newConfigViewCmd()
+			out := captureStdout(t, func() {
+				cmd.Run(cmd, nil)
+			})
+			assert.Contains(t, out, tc.want+"\n")
+			assert.NotContains(t, out, tc.key)
+		})
+	}
+}
