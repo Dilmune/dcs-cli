@@ -32,7 +32,7 @@ func PrintTableFixed(headers []string, rows [][]string, fixed []bool) {
 		fmt.Println(Muted.Render(leftMargin + "No results found."))
 		return
 	}
-	fmt.Print(renderTable(headers, rows, fixed, terminalWidth()))
+	fmt.Print(renderTable(headers, rows, fixed, TerminalWidth()))
 }
 
 func renderTable(headers []string, rows [][]string, fixed []bool, termWidth int) string {

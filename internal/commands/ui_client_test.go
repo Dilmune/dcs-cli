@@ -64,9 +64,17 @@ func TestUISourceReadsVerifiedAPIShapesAndPaginates(t *testing.T) {
 				require.Len(t, item.Children, 2)
 				assert.Equal(t, "Next page", item.Children[1].Title)
 				assert.Equal(t, 2, item.Children[1].Request.Page)
-				assert.Equal(t, "Fixture size", fieldValue(item.Children[0].Fields, "Size"))
 				if kind == workspace.SiteServers {
 					assert.Equal(t, workspace.Sites, item.Children[0].Request.Kind)
+					assert.Equal(t, "Choose a server", item.Title)
+					assert.Equal(t, uiSitePickerDescription+" Page 1 of 2.", item.Description)
+					assert.Empty(t, item.Children[0].Description)
+					assert.Empty(t, item.Children[0].Command, "the picker shows no server command reference")
+					assert.Equal(t, []workspace.Field{{Label: "Provider", Value: "test-provider"}, {Label: "Region", Value: "test-region"}, {Label: "IPv4", Value: "192.0.2.1"}}, item.Children[0].Fields)
+				} else {
+					assert.Equal(t, "Fixture size", fieldValue(item.Children[0].Fields, "Size"))
+					assert.Equal(t, "dcs servers info -- 'srv-1'", item.Children[0].Command, "the Servers area keeps its reference")
+					assert.Equal(t, "test-provider · test-region", item.Children[0].Description)
 				}
 			case workspace.Sites:
 				require.Len(t, item.Children, 1)

@@ -96,3 +96,46 @@ func TestUICatalogCoversThePlatformAndUsesActualCommands(t *testing.T) {
 		assert.Contains(t, paths, name)
 	}
 }
+
+func TestUICatalogListsSingleCommandAreasBySubcommand(t *testing.T) {
+	root := NewRootCmd()
+	catalog := uiCatalog(root)
+	byTitle := map[string]workspace.Item{}
+	for _, area := range catalog.Children {
+		byTitle[area.Title] = area
+	}
+	titles := func(items []workspace.Item) []string {
+		var out []string
+		for _, item := range items {
+			out = append(out, item.Title)
+		}
+		return out
+	}
+	for _, tc := range []struct{ area, parent string }{{"Databases", "db"}, {"Storage", "storage"}} {
+		t.Run(tc.area, func(t *testing.T) {
+			parent, _, err := root.Find([]string{tc.parent})
+			require.NoError(t, err)
+			var want []string
+			for _, sub := range parent.Commands() {
+				if sub.IsAvailableCommand() && !sub.Hidden {
+					want = append(want, sub.CommandPath())
+				}
+			}
+			require.NotEmpty(t, want, "the fixture needs a parent with subcommands")
+			area := byTitle[tc.area]
+			got := titles(area.Children)
+			require.Equal(t, append([]string{parent.CommandPath()}, want...), got)
+			assert.Equal(t, parent.UseLine(), area.Children[0].Command, "the parent guide stays first so its help is not lost")
+			assert.Empty(t, area.Children[0].Children, "the parent entry does not repeat the subcommands a level down")
+			for _, child := range area.Children[1:] {
+				assert.NotEmpty(t, child.Command)
+				assert.True(t, strings.HasPrefix(child.Title, parent.CommandPath()+" "), child.Title)
+			}
+		})
+	}
+	operations := byTitle["Operations"]
+	assert.Equal(t, []string{"dcs logs", "dcs env", "dcs firewall", "dcs cron", "dcs daemon", "dcs software", "dcs status", "dcs config", "dcs open"}, titles(operations.Children))
+	logs, _, err := root.Find([]string{"logs"})
+	require.NoError(t, err)
+	assert.Len(t, operations.Children[0].Children, len(logs.Commands()), "a multi-command area keeps subcommands one level down")
+}

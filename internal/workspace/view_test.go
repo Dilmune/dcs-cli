@@ -124,7 +124,7 @@ func TestStatusAndLabelsUseTheWorkspaceRendererTokens(t *testing.T) {
 			s := workspaceStyles(r, tc.theme, tc.theme == "dark")
 			tokens := ui.Palette(tc.mode)
 
-			line := s.keyValue(Field{LabelStatus, "active"})
+			line := s.keyValueLines(Field{LabelStatus, "active"}, 80)[0]
 			require.Contains(t, seqFor(r, tokens.Muted), "38;2;", "the renderer must be in true color for this test to mean anything")
 			assert.Contains(t, line, seqFor(r, tokens.Muted), "label uses the muted token")
 			assert.Contains(t, line, seqFor(r, tokens.Success), "healthy status uses the success token")
@@ -135,9 +135,67 @@ func TestStatusAndLabelsUseTheWorkspaceRendererTokens(t *testing.T) {
 				assert.NotContains(t, line, seqFor(r, ui.Palette(ui.ModeDark).Success), "the process-wide dark palette must not leak into a %s workspace", tc.theme)
 			}
 
-			plain := s.keyValue(Field{"IPv4", "203.0.113.10"})
+			plain := s.keyValueLines(Field{"IPv4", "203.0.113.10"}, 80)[0]
 			assert.True(t, strings.HasSuffix(plain, "  203.0.113.10"), "value follows two plain spaces with no escape: %q", plain)
 			assert.Equal(t, "        IPv4  203.0.113.10", ansi.Strip(plain))
 		})
 	}
+}
+
+func TestKeyValueContinuationLinesHangUnderTheValueColumn(t *testing.T) {
+	m := testModel()
+	const width = 60
+	value := strings.Repeat("abcdefghi ", 12)[:120]
+	item := Item{Fields: []Field{{"Size", value}, {"IPv4", "203.0.113.10"}}}
+	lines := m.detailView(item, width)
+	require.Greater(t, len(lines), 3, "a 120-cell value at width 60 must wrap")
+	assert.True(t, strings.HasPrefix(lines[0], "        Size  abcdefghi"), "the first line keeps the label: %q", lines[0])
+	var continuation []string
+	for _, line := range lines[1:] {
+		if strings.HasPrefix(line, "        IPv4") || line == "" {
+			break
+		}
+		continuation = append(continuation, line)
+	}
+	require.NotEmpty(t, continuation)
+	for _, line := range continuation {
+		assert.True(t, strings.HasPrefix(line, strings.Repeat(" ", 14)), "continuation starts with 14 spaces: %q", line)
+		assert.NotEqual(t, ' ', line[14], "exactly 14 spaces, then the value: %q", line)
+	}
+	for _, line := range lines {
+		assert.LessOrEqual(t, ansi.StringWidth(line), width, "line exceeds the width: %q", line)
+	}
+	joined := strings.Join(append([]string{strings.TrimSpace(lines[0][14:])}, func() []string {
+		var parts []string
+		for _, line := range continuation {
+			parts = append(parts, strings.TrimSpace(line))
+		}
+		return parts
+	}()...), " ")
+	assert.Equal(t, strings.TrimSpace(value), joined, "wrapping drops no text")
+	assert.Equal(t, "        IPv4  203.0.113.10", lines[len(continuation)+1], "the next field follows without a hanging indent")
+
+	m.width, m.height = 100, 30
+	m.current, m.history = Item{ID: "live", Title: "Long", Children: []Item{{ID: "x", Title: "Wide", Fields: item.Fields}}}, []frameState{{item: m.root}}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if strings.Contains(line, "│ "+strings.Repeat(" ", 14)) {
+			return
+		}
+	}
+	t.Fatal("the split right pane must hang continuation lines under the value column")
+}
+
+func TestListViewSitePickerShowsPurposeNotServerReference(t *testing.T) {
+	m := testModel()
+	m.width, m.height = 100, 30
+	picker := Item{ID: "live-sites", Title: "Choose a server", Description: "Pick the server whose sites you want to browse.", Children: []Item{{ID: "srv-1", Title: "Fixture server", Status: "active", Description: "",
+		Fields: []Field{{"Provider", "hetzner"}, {"Region", "hel1"}, {"IPv4", "203.0.113.10"}}, Request: &Request{Kind: Sites, ServerID: "srv-1"}}}}
+	m.current, m.history = picker, []frameState{{item: m.root}}
+	view := m.View()
+	assert.Contains(t, view, "   Pick the server whose sites you want to browse.")
+	assert.Contains(t, view, "│ ● active")
+	assert.Contains(t, view, "│     Provider  hetzner")
+	assert.NotContains(t, view, "$ dcs servers info")
+	assert.NotContains(t, view, commandReferenceLabel)
+	assert.NotContains(t, view, "Status  ●", "the picker carries no server inspection fields")
 }

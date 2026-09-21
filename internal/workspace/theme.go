@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -68,14 +69,28 @@ func (s styles) tone(tone ui.Tone) lipgloss.Style {
 	}
 }
 
-// keyValue follows the plain-output rule: muted label right-aligned in the
-// 12-cell column, two spaces, unstyled value. Empty values return "".
-func (s styles) keyValue(f Field) string {
+// keyValueIndent is the value column: the 12-cell label plus the two-space gap.
+const keyValueIndent = 12 + 2
+
+// keyValueLines follows the plain-output rule: muted label right-aligned in
+// the 12-cell column, two spaces, unstyled value. A value longer than the
+// remaining width wraps under its own column instead of falling back to the
+// label column. Empty values return nil.
+func (s styles) keyValueLines(f Field, width int) []string {
+	if f.Value == "" {
+		return nil
+	}
 	value := f.Value
 	if f.IsStatus() {
 		value = s.status(value)
 	}
-	return ui.FormatKeyValue(f.Label, value, s.muted)
+	lines := wrap(value, width-keyValueIndent)
+	lines[0] = ui.FormatKeyValue(f.Label, lines[0], s.muted)
+	indent := strings.Repeat(" ", keyValueIndent)
+	for i := 1; i < len(lines); i++ {
+		lines[i] = indent + lines[i]
+	}
+	return lines
 }
 
 // subtitle is the muted line under a title: "● active · hetzner · hel1".

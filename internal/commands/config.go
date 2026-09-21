@@ -48,8 +48,8 @@ func newConfigViewCmd() *cobra.Command {
 			ui.PrintSection("Configuration")
 			ui.PrintKeyValue("Config file", config.FilePath())
 			ui.PrintKeyValue("API URL", cfg.APIURL)
-			if cfg.IsAuthenticated() && len(cfg.APIKey) > 12 {
-				ui.PrintKeyValue("API key", cfg.APIKey[:12]+"…")
+			if masked := ui.MaskSecret(cfg.APIKey); cfg.IsAuthenticated() && masked != "" {
+				ui.PrintKeyValue("API key", masked)
 			} else if cfg.IsAuthenticated() {
 				ui.PrintKeyValue("API key", "***")
 			} else {
