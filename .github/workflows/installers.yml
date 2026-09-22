@@ -164,6 +164,22 @@ jobs:
               [Environment]::SetEnvironmentVariable('Path', $userPath, 'User')
           }
 
+      # The API fallback would hide a broken redirect, so the redirect runs alone here.
+      - name: Latest tag from the redirect alone
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $env:DCS_INSTALL_TEST = '1'
+          . (Resolve-Path -LiteralPath install.ps1).Path
+          "SecurityProtocol before the installer's 5.1 change: $([Net.ServicePointManager]::SecurityProtocol)"
+          if ($PSVersionTable.PSEdition -ne 'Core') {
+              [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+          }
+          $latest = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name
+          $redirected = Get-DcsLatestTag -LatestUrl "https://github.com/$env:GITHUB_REPOSITORY/releases/latest" -ApiUrl 'http://127.0.0.1:9/unreachable'
+          "releases API $latest, redirect alone '$redirected'"
+          if (-not (Test-DcsReleaseTag -Tag $latest) -or $redirected -cne $latest) { throw 'the releases/latest redirect did not resolve the latest tag' }
+
       # No DCS_INSTALL_DIR in these two steps, so the default directory stays covered.
       - name: Install the latest release
         env:
