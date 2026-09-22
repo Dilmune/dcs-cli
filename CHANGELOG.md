@@ -1,5 +1,15 @@
 # DCS CLI changes
 
+## 3.8.3 (2026-09-22)
+
+### Fixes
+
+- `dcs status` follows `--theme`. It used to match the terminal's background
+  whatever you passed.
+- `dcs status` and `dcs ui` no longer ask the terminal for its background
+  color a second time, which could add several seconds to each run in
+  terminals that do not answer.
+
 ## 3.8.2 (2026-09-21)
 
 ### Workspace refinements

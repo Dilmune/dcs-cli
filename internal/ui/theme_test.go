@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -69,6 +72,90 @@ func TestResolveMode(t *testing.T) {
 			assert.Equal(t, tc.want, ResolveMode(tc.theme, tc.detect))
 		})
 	}
+}
+
+// terminalRecorder stands in for a terminal that never answers: it satisfies
+// termenv's File, so a renderer on it will query, and it keeps every byte the
+// renderer writes, so a query cannot go unnoticed.
+type terminalRecorder struct{ bytes.Buffer }
+
+func (*terminalRecorder) Read([]byte) (int, error) { return 0, io.EOF }
+func (*terminalRecorder) Fd() uintptr              { return 0 }
+
+type terminalEnv map[string]string
+
+func (e terminalEnv) Environ() []string {
+	env := make([]string, 0, len(e))
+	for key, value := range e {
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
+func (e terminalEnv) Getenv(key string) string { return e[key] }
+
+func withRecordingRenderer(t *testing.T) *terminalRecorder {
+	t.Helper()
+	prevRenderer, prevPlain := lipgloss.DefaultRenderer(), plain
+	tty := &terminalRecorder{}
+	lipgloss.SetDefaultRenderer(lipgloss.NewRenderer(tty, termenv.WithUnsafe(), termenv.WithEnvironment(terminalEnv{"TERM": "xterm-256color"})))
+	t.Cleanup(func() {
+		lipgloss.SetDefaultRenderer(prevRenderer)
+		plain = prevPlain
+		applyMode(ModeDark)
+	})
+	return tty
+}
+
+func TestRecordingRendererSeesALazyBackgroundQuery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("termenv never queries the terminal on Windows: its backgroundColor returns a fixed default, so there is no query to control for")
+	}
+	tty := withRecordingRenderer(t)
+	lipgloss.HasDarkBackground()
+	assert.Contains(t, tty.String(), "\x1b]11;?", "without this control the empty-recorder checks below prove nothing")
+}
+
+func TestInitMode_OnlyAutoOnAColorTerminalConsultsTheDetector(t *testing.T) {
+	tests := []struct {
+		name       string
+		theme      Mode
+		plain      bool
+		detected   bool
+		wantMode   Mode
+		wantDetect int
+	}{
+		{"plain ignores an explicit theme", ModeLight, true, false, ModeDark, 0},
+		{"plain ignores auto", ModeAuto, true, false, ModeDark, 0},
+		{"explicit light", ModeLight, false, true, ModeLight, 0},
+		{"explicit dim", ModeDim, false, true, ModeDim, 0},
+		{"explicit dark", ModeDark, false, false, ModeDark, 0},
+		{"auto on a dark terminal", ModeAuto, false, true, ModeDark, 1},
+		{"auto on a light terminal", ModeAuto, false, false, ModeLight, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tty := withRecordingRenderer(t)
+			detections := 0
+			initMode(tc.theme, tc.plain, func() bool {
+				detections++
+				return tc.detected
+			})
+
+			assert.Equal(t, tc.wantDetect, detections)
+			assert.Equal(t, tc.wantMode, CurrentMode())
+			assert.Equal(t, tc.plain, IsPlain())
+			assert.Equal(t, tc.wantMode.HasDarkBackground(), lipgloss.HasDarkBackground(), "the default renderer carries the resolved background")
+			assert.Empty(t, tty.String(), "an explicit background leaves the renderer nothing to query")
+		})
+	}
+}
+
+func TestInit_PlainNeverReachesTheRendererDetector(t *testing.T) {
+	tty := withRecordingRenderer(t)
+	Init(string(ModeAuto), true)
+	assert.True(t, lipgloss.HasDarkBackground())
+	assert.Empty(t, tty.String())
 }
 
 type rgb [3]int

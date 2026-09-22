@@ -3,6 +3,8 @@ package workspace
 import (
 	"context"
 	"io"
+
+	"github.com/dilmune/dcs-cli/internal/ui"
 )
 
 type Kind uint8
@@ -70,6 +72,6 @@ type Options struct {
 	ShowWelcome     bool
 	RememberWelcome func() error
 	NoColor         bool
-	Theme           string
+	Mode            ui.Mode
 	Version         string
 }
