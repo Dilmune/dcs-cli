@@ -79,7 +79,7 @@ jobs:
           node-version: "24.21.0"
       - name: Verify release guards
         run: |
-          node --test scripts/release-check.test.mjs
+          node --test scripts/release-check.test.mjs scripts/homebrew-formula.test.mjs
           node scripts/release-check.mjs source "$CLI_RELEASE_TAG"
       - name: Install pinned scanners
         run: |
