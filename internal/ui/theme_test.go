@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -107,6 +108,9 @@ func withRecordingRenderer(t *testing.T) *terminalRecorder {
 }
 
 func TestRecordingRendererSeesALazyBackgroundQuery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("termenv never queries the terminal on Windows: its backgroundColor returns a fixed default, so there is no query to control for")
+	}
 	tty := withRecordingRenderer(t)
 	lipgloss.HasDarkBackground()
 	assert.Contains(t, tty.String(), "\x1b]11;?", "without this control the empty-recorder checks below prove nothing")
