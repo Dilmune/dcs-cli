@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -54,8 +53,8 @@ func newStatusCmd() *cobra.Command {
 					workspace.AreaSites:     stats.SiteCount,
 					workspace.AreaDatabases: stats.DatabaseCount,
 				},
-				Theme:   workspace.ThemeAuto,
-				NoColor: plainStatusOutput(),
+				Mode:    ui.CurrentMode(),
+				NoColor: ui.IsPlain(),
 			}); err != nil {
 				return fmt.Errorf("render overview: %w", err)
 			}
@@ -80,10 +79,4 @@ func statusAccount(ctx context.Context) string {
 		return ""
 	}
 	return user.DisplayName()
-}
-
-// Layout never depends on color: a pipe, --quiet, --no-color or NO_COLOR all
-// print the same text with no escape sequences.
-func plainStatusOutput() bool {
-	return noColor || quietMode || os.Getenv("NO_COLOR") != "" || !ui.IsTerminal()
 }

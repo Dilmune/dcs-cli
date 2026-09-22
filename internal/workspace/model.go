@@ -59,7 +59,7 @@ type model struct {
 
 func newModel(opts Options) model {
 	root := cleanItem(opts.Catalog)
-	return model{styles: newStyles(opts.Output, opts.Theme, opts.NoColor), root: root, current: root,
+	return model{styles: newStyles(opts.Output, opts.Mode, opts.NoColor), root: root, current: root,
 		width: 100, height: 30, account: "Checking account...", version: Clean(opts.Version), welcome: opts.ShowWelcome, remember: opts.RememberWelcome}
 }
 

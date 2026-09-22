@@ -16,6 +16,8 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dilmune/dcs-cli/internal/ui"
 )
 
 func testModel() model {
@@ -27,7 +29,7 @@ func testModel() model {
 		{ID: "access", Title: "Access", Body: "Keys"},
 		{ID: "operations", Title: "Operations", Body: "Logs"},
 	}}
-	m := newModel(Options{Output: io.Discard, Catalog: root, NoColor: true, Theme: "light", RememberWelcome: func() error { return nil }})
+	m := newModel(Options{Output: io.Discard, Catalog: root, NoColor: true, Mode: ui.ModeLight, RememberWelcome: func() error { return nil }})
 	m.identify = func() tea.Msg { return identityMsg{name: "Test account"} }
 	m.fetch = func(req Request, generation int) (tea.Cmd, context.CancelFunc) {
 		return func() tea.Msg {
@@ -328,7 +330,7 @@ func TestWorkspaceFirstRunSearchDoesNotNeedAnExtraEnter(t *testing.T) {
 }
 
 func TestWorkspaceLayoutBoundsAndWelcomeControls(t *testing.T) {
-	for _, theme := range []string{"light", "dim", "dark"} {
+	for _, theme := range []ui.Mode{ui.ModeLight, ui.ModeDim, ui.ModeDark} {
 		for _, size := range [][2]int{{20, 10}, {48, 20}, {60, 24}, {79, 24}, {80, 20}, {80, 21}, {80, 24}, {90, 28}, {110, 32}, {160, 48}} {
 			for _, mode := range []string{"home", "welcome", "help", "search", "detail", "error", "loading"} {
 				t.Run(fmt.Sprintf("%s/%dx%d/%s", theme, size[0], size[1], mode), func(t *testing.T) {
@@ -428,14 +430,14 @@ func TestWorkspaceLogoPixelGeometry(t *testing.T) {
 }
 
 func TestWorkspaceLogoColorProfilesAndLayout(t *testing.T) {
-	for _, theme := range []string{"light", "dim", "dark"} {
+	for _, theme := range []ui.Mode{ui.ModeLight, ui.ModeDim, ui.ModeDark} {
 		for _, profile := range []termenv.Profile{termenv.TrueColor, termenv.ANSI256, termenv.ANSI, termenv.Ascii} {
 			t.Run(fmt.Sprintf("%s/%d", theme, profile), func(t *testing.T) {
 				r := lipgloss.NewRenderer(io.Discard)
 				r.SetColorProfile(profile)
-				r.SetHasDarkBackground(theme == "dark")
+				r.SetHasDarkBackground(theme.HasDarkBackground())
 				m := testModel()
-				m.styles = workspaceStyles(r, theme, theme == "dark")
+				m.styles = workspaceStyles(r, theme)
 				m.welcome = true
 				logo := strings.Join(m.renderLogo(logoWidth), "\n")
 				if profile == termenv.Ascii {
@@ -577,7 +579,7 @@ func TestWorkspaceWelcomeYieldsToFocusedViewsAndNotices(t *testing.T) {
 
 func TestWorkspaceLogoHonorsNoColor(t *testing.T) {
 	m := testModel()
-	m.styles = newStyles(io.Discard, "dark", true)
+	m.styles = newStyles(io.Discard, ui.ModeDark, true)
 	assert.True(t, m.styles.asciiLogo)
 	assert.NotContains(t, strings.Join(m.renderLogo(logoWidth), "\n"), "\x1b")
 }

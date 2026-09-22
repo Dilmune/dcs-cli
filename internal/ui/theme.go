@@ -64,6 +64,12 @@ func Palette(mode Mode) Tokens {
 	}
 }
 
+// HasDarkBackground reports whether the mode's tokens are drawn for a dark
+// background. Like Palette, anything but light or dim is dark.
+func (m Mode) HasDarkBackground() bool {
+	return m != ModeLight && m != ModeDim
+}
+
 // Styles default to dark so output before Init (tests, early errors) still
 // resolves to a token; Init rebuilds them for the resolved mode.
 var (
@@ -87,13 +93,17 @@ var (
 // then the terminal background, then dark. --no-color, NO_COLOR, a non-TTY
 // stdout and --quiet all disable escape sequences without changing layout.
 func Init(theme string, noColor bool) {
-	plain = noColor || isNoColor() || !IsTerminal() || quiet
+	initMode(Mode(theme), noColor || isNoColor() || !IsTerminal() || quiet, lipgloss.HasDarkBackground)
+}
+
+func initMode(theme Mode, plainOutput bool, detectDark func() bool) {
+	plain = plainOutput
 	if plain {
 		lipgloss.SetColorProfile(termenv.Ascii)
 		applyMode(ModeDark)
 		return
 	}
-	applyMode(ResolveMode(Mode(theme), lipgloss.HasDarkBackground))
+	applyMode(ResolveMode(theme, detectDark))
 }
 
 // ResolveMode maps a theme flag to a concrete mode. detectDark is only
@@ -117,6 +127,9 @@ func IsPlain() bool { return plain }
 
 func applyMode(m Mode) {
 	mode = m
+	// huh and bubbles render AdaptiveColor through the default renderer, which
+	// queries the terminal for its background unless it has been told.
+	lipgloss.SetHasDarkBackground(m.HasDarkBackground())
 	t := Palette(m)
 	Accent = lipgloss.NewStyle().Foreground(t.Accent)
 	Muted = lipgloss.NewStyle().Foreground(t.Muted)

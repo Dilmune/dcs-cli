@@ -18,26 +18,22 @@ type styles struct {
 
 // Colors come from the ui token table; the workspace owns nothing but the
 // logo palette. The user's background and body color stay intact.
-func newStyles(out io.Writer, theme string, plain bool) styles {
+func newStyles(out io.Writer, mode ui.Mode, plain bool) styles {
+	return workspaceStyles(newRenderer(out, mode, plain), mode)
+}
+
+// newRenderer takes the mode ui.Init resolved instead of detecting its own, so
+// the workspace never queries the terminal a second time.
+func newRenderer(out io.Writer, mode ui.Mode, plain bool) *lipgloss.Renderer {
 	r := lipgloss.NewRenderer(out)
 	if plain {
 		r.SetColorProfile(termenv.Ascii)
 	}
-	dark := theme == "dark"
-	if theme == "auto" && !plain {
-		dark = r.HasDarkBackground()
-	}
-	r.SetHasDarkBackground(dark)
-	return workspaceStyles(r, theme, dark)
+	r.SetHasDarkBackground(mode.HasDarkBackground())
+	return r
 }
 
-func workspaceStyles(r *lipgloss.Renderer, theme string, dark bool) styles {
-	mode := ui.ModeLight
-	if dark {
-		mode = ui.ModeDark
-	} else if theme == string(ui.ModeDim) {
-		mode = ui.ModeDim
-	}
+func workspaceStyles(r *lipgloss.Renderer, mode ui.Mode) styles {
 	t := ui.Palette(mode)
 	b := r.NewStyle()
 	face, side, terracotta := logoPalette()
@@ -46,8 +42,8 @@ func workspaceStyles(r *lipgloss.Renderer, theme string, dark bool) styles {
 		logoFace: b.Foreground(face), logoSide: b.Foreground(side), logoAccent: b.Foreground(terracotta), asciiLogo: r.ColorProfile() == termenv.Ascii}
 }
 
-// status renders glyph plus word in the workspace's own renderer so the mode
-// chosen in newStyles applies; ui.Status would use the process-wide styles.
+// status renders glyph plus word in the workspace's own renderer so its
+// profile and mode apply; ui.Status would use the process-wide styles.
 func (s styles) status(word string) string {
 	if word == "" {
 		return ""
