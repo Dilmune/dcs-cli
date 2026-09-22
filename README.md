@@ -7,10 +7,31 @@ This repository contains the CLI client, not the Dilmune Cloud backend.
 
 ## Install
 
+Install with one command on Linux or macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Dilmune/dcs-cli/main/install.sh | sh
+```
+
+The script downloads the release archive for your OS and architecture, verifies
+its SHA-256 against the release's `checksums.txt`, and puts `dcs` in
+`~/.local/bin`. Set `DCS_VERSION=vX.Y.Z` to install a specific release and
+`DCS_INSTALL_DIR=/some/dir` to install somewhere else. It refuses to run as
+root unless `DCS_INSTALL_DIR` is set, and tells you the PATH line to add if the
+directory is not already on it.
+
 With Homebrew:
 
 ```sh
 brew install dilmune/tap/dcs
+```
+
+Homebrew shows the tap as `Untrusted` in `brew tap-info dilmune/tap`. That is
+expected for any tap outside homebrew-core and does not block the install. To
+mark it trusted:
+
+```sh
+brew trust --tap dilmune/tap
 ```
 
 For manual installation, download the archive for your operating system and
