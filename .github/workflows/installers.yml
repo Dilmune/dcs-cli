@@ -1,0 +1,190 @@
+name: Installers
+
+on:
+  pull_request:
+    paths:
+      - install.sh
+      - install.ps1
+      - .github/workflows/installers.yml
+  workflow_dispatch:
+  schedule:
+    - cron: "41 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  sh:
+    name: install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DCS_INSTALL_DIR: ${{ runner.temp }}/dcs
+        run: |
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          sh < install.sh
+          installed="$("$DCS_INSTALL_DIR/dcs" version --json | jq -r .version)"
+          echo "latest release $latest, installed $installed"
+          test "$installed" = "${latest#v}"
+      - name: Install a pinned release over it
+        env:
+          DCS_VERSION: v3.8.1
+          DCS_INSTALL_DIR: ${{ runner.temp }}/dcs
+        run: |
+          sh < install.sh
+          installed="$("$DCS_INSTALL_DIR/dcs" version --json | jq -r .version)"
+          echo "installed $installed"
+          test "$installed" = 3.8.1
+
+  ps1:
+    name: install.ps1 (windows-2022, ${{ matrix.shell }})
+    runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Parse, tag guard and checksum checks
+        run: |
+          "PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+          $script = (Resolve-Path -LiteralPath install.ps1).Path
+          if (@([System.IO.File]::ReadAllBytes($script) | Where-Object { $_ -gt 0x7F }).Count) {
+              throw 'install.ps1 must stay ASCII: Windows PowerShell 5.1 reads a file without a BOM as ANSI'
+          }
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$null, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count) { throw "install.ps1 does not parse: $($parseErrors -join '; ')" }
+
+          $env:DCS_INSTALL_TEST = '1'
+          . $script
+
+          foreach ($tag in 'v3.8.1', 'v10.20.30') {
+              if (-not (Test-DcsReleaseTag -Tag $tag)) { throw "the tag guard rejected $tag" }
+          }
+          foreach ($tag in 'v3.8.2 [following]', '3.8.1', 'v3.8.2-rc1', 'V3.8.1', "v3.8.1`n", "v3.$([char]0x0663).1", '') {
+              if (Test-DcsReleaseTag -Tag $tag) { throw "the tag guard accepted '$tag'" }
+          }
+
+          $work = Join-Path $env:RUNNER_TEMP 'checksum checks'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          $archive = Join-Path $work 'dcs_windows_amd64.zip'
+          [System.IO.File]::WriteAllText($archive, 'not a real archive')
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksums = Join-Path $work 'checksums.txt'
+          $cases = [ordered]@{
+              "$hash  dcs_windows_amd64.zip" = ''
+              "$('0' * 64)  dcs_windows_amd64.zip" = 'dcs install: checksum mismatch for dcs_windows_amd64.zip*'
+              "$hash  dcs_windows_arm64.zip" = 'dcs install: checksums.txt has no entry for dcs_windows_amd64.zip'
+          }
+          foreach ($line in $cases.Keys) {
+              Set-Content -LiteralPath $checksums -Value $line
+              $message = ''
+              try { Assert-DcsChecksum -Archive $archive -Checksums $checksums -Name 'dcs_windows_amd64.zip' } catch { $message = $_.Exception.Message }
+              "checksums.txt '$line' -> '$message'"
+              if ($cases[$line] -and $message -notlike $cases[$line]) { throw "expected an error like '$($cases[$line])'" }
+              if (-not $cases[$line] -and $message) { throw 'a matching checksum was rejected' }
+          }
+
+      - name: Architecture, locked target and PATH command checks
+        run: |
+          $script = (Resolve-Path -LiteralPath install.ps1).Path
+          $env:DCS_INSTALL_TEST = '1'
+          . $script
+
+          foreach ($case in 'X64||AMD64=amd64', 'Arm64||ARM64=arm64', '|AMD64|x86=amd64', '|ARM64|x86=arm64', '||AMD64=amd64', '||ARM64=arm64') {
+              $names, $want = $case -split '='
+              $os, $wow64, $process = $names -split '\|'
+              $got = Resolve-DcsArchitecture -OSArchitecture $os -Wow64Architecture $wow64 -ProcessArchitecture $process
+              if ($got -ne $want) { throw "$case resolved to $got" }
+          }
+          $reported = Get-DcsOSArchitecture
+          $resolved = Resolve-DcsArchitecture -OSArchitecture $reported -Wow64Architecture $env:PROCESSOR_ARCHITEW6432 -ProcessArchitecture $env:PROCESSOR_ARCHITECTURE
+          "RuntimeInformation reports '$reported', resolved $resolved"
+          if ($resolved -ne 'amd64') { throw "resolved $resolved on an x64 runner" }
+          if ($PSVersionTable.PSEdition -eq 'Desktop') {
+              $wow64Shell = Join-Path $env:SystemRoot 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
+              $seen = & $wow64Shell -NoProfile -Command {
+                  param($path)
+                  Invoke-Expression ([System.IO.File]::ReadAllText($path))
+                  '{0} {1} {2}' -f $env:PROCESSOR_ARCHITECTURE, $env:PROCESSOR_ARCHITEW6432, (Resolve-DcsArchitecture -OSArchitecture (Get-DcsOSArchitecture) -Wow64Architecture $env:PROCESSOR_ARCHITEW6432 -ProcessArchitecture $env:PROCESSOR_ARCHITECTURE)
+              } -args $script
+              "32-bit Windows PowerShell: $seen"
+              if ($seen -ne 'x86 AMD64 amd64') { throw "32-bit Windows PowerShell resolved '$seen'" }
+          }
+
+          $locked = Join-Path $env:RUNNER_TEMP 'locked dcs'
+          New-Item -ItemType Directory -Path $locked | Out-Null
+          $target = Join-Path $locked 'dcs.exe'
+          Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\PING.EXE') -Destination $target
+          $replacement = Join-Path $env:SystemRoot 'System32\whoami.exe'
+          $running = Start-Process -FilePath $target -ArgumentList '-n 60 127.0.0.1' -WindowStyle Hidden -PassThru
+          $message = ''
+          try {
+              Install-DcsExecutable -Source $replacement -Directory $locked | Out-Null
+          } catch {
+              $message = $_.Exception.Message
+          } finally {
+              Stop-Process -Id $running.Id -Force
+              $running.WaitForExit()
+          }
+          "running target -> '$message'"
+          if ($message -notlike "dcs install: $target is in use*") { throw 'a running dcs.exe was not reported as in use' }
+          if (Test-Path -LiteralPath "$target.tmp") { throw 'the staged copy was left behind' }
+          Install-DcsExecutable -Source $replacement -Directory $locked | Out-Null
+          if ((Get-FileHash -LiteralPath $target).Hash -ne (Get-FileHash -LiteralPath $replacement).Hash) { throw 'the replace after exit did not land' }
+
+          $quoted = Join-Path $env:RUNNER_TEMP "it's dcs"
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (Test-DcsDirectoryOnPath -Directory $quoted) { throw "$quoted is on PATH before the command ran" }
+          Invoke-Expression (Get-DcsPathCommand -Directory $quoted)
+          try {
+              if (-not (Test-DcsDirectoryOnPath -Directory $quoted)) { throw 'the printed PATH command did not add the directory' }
+          } finally {
+              [Environment]::SetEnvironmentVariable('Path', $userPath, 'User')
+          }
+
+      # No DCS_INSTALL_DIR in these two steps, so the default directory stays covered.
+      - name: Install the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $latest = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name
+          if ($latest -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "unexpected latest release tag: '$latest'" }
+          $output = Get-Content -Raw -LiteralPath install.ps1 | Invoke-Expression | Out-String
+          $output
+          $dcs = Join-Path $env:LOCALAPPDATA 'Programs\dcs\dcs.exe'
+          $installed = (& $dcs version --json | Out-String | ConvertFrom-Json).version
+          "latest release $latest, installed $installed"
+          if ($installed -cne $latest.Substring(1)) { throw "installed $installed, expected $($latest.Substring(1))" }
+          if ($output -notlike '*SetEnvironmentVariable*') { throw 'the installer did not print the PATH command' }
+
+      - name: Install a pinned release over it
+        env:
+          DCS_VERSION: v3.8.1
+        run: |
+          Get-Content -Raw -LiteralPath install.ps1 | Invoke-Expression
+          $dcs = Join-Path $env:LOCALAPPDATA 'Programs\dcs\dcs.exe'
+          $installed = (& $dcs version --json | Out-String | ConvertFrom-Json).version
+          "installed $installed"
+          if ($installed -cne '3.8.1') { throw "installed $installed, expected 3.8.1" }
