@@ -109,6 +109,9 @@ open_ghostty() {
   open -na "$GHOSTTY_APP" --args "${args[@]}" "--command=/bin/bash $(printf '%q' "$4")"
 }
 
+# The window lookup only sees the current desktop, so a window that opens on
+# another Space is invisible to it. Activating pulls it here; the caller
+# retries once with a fresh window before giving up.
 wait_for_window() {
   local i id
   for ((i = 0; i < WAIT_STEPS; i++)); do
@@ -119,7 +122,13 @@ wait_for_window() {
     fi
     sleep 0.5
   done
-  die "no Ghostty window appeared"
+  return 1
+}
+
+activate_ghostty() {
+  if ! osascript -e 'tell application "Ghostty" to activate' >/dev/null 2>&1; then
+    printf 'note: could not activate Ghostty; the window may be on another desktop\n'
+  fi
 }
 
 wait_for_file() {
@@ -162,9 +171,18 @@ capture() {
 # shoot_runner <name> <cols> <rows> <ghostty-theme> <runner> <done-marker>
 # An empty marker means the window renders something already running (tmux).
 shoot_runner() {
-  local id
-  open_ghostty "$2" "$3" "$4" "$5"
-  id="$(wait_for_window)"
+  local id="" attempt
+  for attempt in 1 2; do
+    open_ghostty "$2" "$3" "$4" "$5"
+    activate_ghostty
+    if id="$(wait_for_window)"; then
+      break
+    fi
+    id=""
+    printf 'note: no Ghostty window on attempt %s for %s; retrying with a fresh window\n' "$attempt" "$1"
+    quit_ghostty
+  done
+  [ -n "$id" ] || die "no Ghostty window appeared for $1"
   if [ -n "$6" ]; then
     wait_for_file "$6"
   fi
