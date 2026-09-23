@@ -20,6 +20,16 @@ its SHA-256 against the release's `checksums.txt`, and puts `dcs` in
 root unless `DCS_INSTALL_DIR` is set, and tells you the PATH line to add if the
 directory is not already on it.
 
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Dilmune/dcs-cli/main/install.ps1 | iex
+```
+
+Set `$env:DCS_VERSION` to pin a release or `$env:DCS_INSTALL_DIR` to replace the
+default `$env:LOCALAPPDATA\Programs\dcs` before you run it, for example
+`$env:DCS_VERSION='v3.8.1'; irm https://raw.githubusercontent.com/Dilmune/dcs-cli/main/install.ps1 | iex`.
+
 With Homebrew:
 
 ```sh
