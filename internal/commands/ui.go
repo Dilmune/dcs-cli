@@ -29,6 +29,7 @@ func newUICmd() *cobra.Command {
 			if !hasUITerminal(cmd) {
 				return fmt.Errorf("dcs ui requires an interactive terminal on both stdin and stdout; use ordinary dcs commands for scripts")
 			}
+			ui.Init(themeFlag, noColor)
 			return nil
 		},
 		PersistentPostRun: func(_ *cobra.Command, _ []string) {},
@@ -45,19 +46,11 @@ func newUICmd() *cobra.Command {
 			if preferenceErr != nil {
 				seen = false
 			}
-			plain, err := cmd.Flags().GetBool("no-color")
-			if err != nil {
-				return fmt.Errorf("read color preference: %w", err)
-			}
-			theme, err := cmd.Flags().GetString("theme")
-			if err != nil {
-				return fmt.Errorf("read theme preference: %w", err)
-			}
 			if err := workspace.Run(cmd.Context(), workspace.Options{
 				Input: cmd.InOrStdin(), Output: cmd.OutOrStdout(), Catalog: uiCatalog(cmd.Root()),
 				Source: &uiSource{api: api}, ShowWelcome: welcome || !seen,
 				RememberWelcome: func() error { return config.RememberUIWelcome(dir) },
-				NoColor:         plain || os.Getenv("NO_COLOR") != "", Theme: theme, Version: client.Version,
+				NoColor:         ui.IsPlain(), Mode: ui.CurrentMode(), Version: client.Version,
 			}); err != nil {
 				return fmt.Errorf("open workspace: %w", err)
 			}

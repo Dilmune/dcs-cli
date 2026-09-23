@@ -6,13 +6,14 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/dilmune/dcs-cli/internal/ui"
 )
 
 const (
 	AreaServers   = "servers"
 	AreaSites     = "sites"
 	AreaDatabases = "databases"
-	ThemeAuto     = "auto"
 
 	plainMargin        = "  "
 	stackedDescription = "     "
@@ -31,14 +32,14 @@ type OverviewOptions struct {
 	Account string
 	Areas   []Item
 	Counts  map[string]int
-	Theme   string
+	Mode    ui.Mode
 	NoColor bool
 }
 
 // RenderOverview prints the dcs ui home screen as static text: no cube, no
 // footer, no selection marker, so the layout survives pipes and pagers.
 func RenderOverview(w io.Writer, opts OverviewOptions) error {
-	s := newStyles(w, opts.Theme, opts.NoColor)
+	s := newStyles(w, opts.Mode, opts.NoColor)
 	width := max(1, opts.Width-2*len(plainMargin))
 	brand := s.title.Render("Dilmune Cloud") + s.muted.Render(brandSuffix)
 	lines := []string{"", pair(brand, s.muted.Render("v"+Clean(opts.Version)), width)}

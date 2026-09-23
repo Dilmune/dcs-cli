@@ -86,3 +86,10 @@ A change to any of this ships only with:
    release.
 4. Pass signal: every surface uses exactly the tokens above and nothing else.
    A grep for `#[0-9a-fA-F]{6}` outside `theme.go` and the logo returns nothing.
+
+Two scripts produce this evidence. `scripts/verify-terminal.sh <dcs-binary>
+<out-dir>` writes the item 1 screenshots (macOS, Ghostty, tmux). It quits
+Ghostty after every capture, so run it from another terminal such as
+Terminal.app with Ghostty closed. `scripts/verify-output.sh <new-binary>
+[<baseline-binary>]` checks items 2 to 4 and prints PASS or FAIL per check;
+it runs only read-only commands.

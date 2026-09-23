@@ -110,19 +110,16 @@ func seqFor(r *lipgloss.Renderer, c lipgloss.Color) string {
 	return strings.TrimSuffix(strings.SplitN(rendered, "x", 2)[0], "m")
 }
 
-// The workspace resolves its mode once in newStyles; a status must take that
+// The workspace renders in the mode it is given; a status must take that
 // mode's token, not the process-wide ui styles that default to dark.
 func TestStatusAndLabelsUseTheWorkspaceRendererTokens(t *testing.T) {
-	for _, tc := range []struct {
-		theme string
-		mode  ui.Mode
-	}{{"light", ui.ModeLight}, {"dim", ui.ModeDim}, {"dark", ui.ModeDark}} {
-		t.Run(tc.theme, func(t *testing.T) {
+	for _, mode := range []ui.Mode{ui.ModeLight, ui.ModeDim, ui.ModeDark} {
+		t.Run(string(mode), func(t *testing.T) {
 			r := lipgloss.NewRenderer(io.Discard)
 			r.SetColorProfile(termenv.TrueColor)
-			r.SetHasDarkBackground(tc.theme == "dark")
-			s := workspaceStyles(r, tc.theme, tc.theme == "dark")
-			tokens := ui.Palette(tc.mode)
+			r.SetHasDarkBackground(mode.HasDarkBackground())
+			s := workspaceStyles(r, mode)
+			tokens := ui.Palette(mode)
 
 			line := s.keyValueLines(Field{LabelStatus, "active"}, 80)[0]
 			require.Contains(t, seqFor(r, tokens.Muted), "38;2;", "the renderer must be in true color for this test to mean anything")
@@ -131,14 +128,25 @@ func TestStatusAndLabelsUseTheWorkspaceRendererTokens(t *testing.T) {
 			assert.Contains(t, s.status("provisioning"), seqFor(r, tokens.Warning))
 			assert.Contains(t, s.status("failed"), seqFor(r, tokens.Danger))
 			assert.Contains(t, s.status("off"), seqFor(r, tokens.Muted))
-			if tc.mode != ui.ModeDark {
-				assert.NotContains(t, line, seqFor(r, ui.Palette(ui.ModeDark).Success), "the process-wide dark palette must not leak into a %s workspace", tc.theme)
+			if mode != ui.ModeDark {
+				assert.NotContains(t, line, seqFor(r, ui.Palette(ui.ModeDark).Success), "the process-wide dark palette must not leak into a %s workspace", mode)
 			}
 
 			plain := s.keyValueLines(Field{"IPv4", "203.0.113.10"}, 80)[0]
 			assert.True(t, strings.HasSuffix(plain, "  203.0.113.10"), "value follows two plain spaces with no escape: %q", plain)
 			assert.Equal(t, "        IPv4  203.0.113.10", ansi.Strip(plain))
 		})
+	}
+}
+
+// Left to detect, a renderer on io.Discard reports a dark background, so the
+// light and dim cases prove the background was set rather than detected.
+func TestNewRendererTakesTheBackgroundFromTheMode(t *testing.T) {
+	for _, mode := range []ui.Mode{ui.ModeLight, ui.ModeDim, ui.ModeDark} {
+		for _, plain := range []bool{false, true} {
+			r := newRenderer(io.Discard, mode, plain)
+			assert.Equal(t, mode.HasDarkBackground(), r.HasDarkBackground(), "mode %s, plain %t", mode, plain)
+		}
 	}
 }
 
