@@ -7,7 +7,10 @@ import (
 	"time"
 	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
+
+	"github.com/dilmune/dcs-cli/internal/ui"
 )
 
 const (
@@ -57,9 +60,12 @@ type model struct {
 	remember                                  func() error
 }
 
-func newModel(opts Options) model {
+// The profile is resolved by the caller and given to Bubble Tea's renderer
+// too. Left to detect on its own the renderer disagrees with these styles
+// inside tmux and quantizes every token they chose.
+func newModel(opts Options, profile colorprofile.Profile) model {
 	root := cleanItem(opts.Catalog)
-	return model{styles: newStyles(opts.Output, opts.Mode, opts.NoColor), root: root, current: root,
+	return model{styles: workspaceStyles(ui.NewPainter(profile), opts.Mode), root: root, current: root,
 		width: 100, height: 30, account: "Checking account...", version: Clean(opts.Version), welcome: opts.ShowWelcome, remember: opts.RememberWelcome}
 }
 
@@ -144,13 +150,28 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.notice = "Welcome preference could not be saved; it may appear again."
 		}
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.updateKey(msg)
+	case tea.PasteMsg:
+		return m.updatePaste(msg)
 	}
 	return m, nil
 }
 
-func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// A paste is never an action: it only ever feeds the search query, opening the
+// search first when the workspace is not already in it.
+func (m model) updatePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	if m.help {
+		return m, nil
+	}
+	if !m.searching {
+		m.startSearch()
+	}
+	m.typeQuery(msg.Content)
+	return m, nil
+}
+
+func (m model) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key == "ctrl+c" || (!m.searching && key == "q") {
 		m.stopLoad()
@@ -168,20 +189,8 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if msg.Type == tea.KeyRunes && msg.Paste && !m.searching {
-		m.startSearch()
-	}
 	if m.searching {
 		return m.searchKey(msg)
-	}
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 {
-		var commands []tea.Cmd
-		for _, r := range msg.Runes {
-			next, command := m.updateKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-			m = next.(model)
-			commands = append(commands, command)
-		}
-		return m, tea.Batch(commands...)
 	}
 	switch key {
 	case "?":
@@ -228,7 +237,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) searchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) searchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.stopSearch()
@@ -252,16 +261,23 @@ func (m model) searchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.query = nil
 		m.cursor = 0
 	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			for _, r := range msg.Runes {
-				if unicode.IsPrint(r) && len(m.query) < queryLimit {
-					m.query = append(m.query, r)
-				}
-			}
-			m.cursor = 0
-		}
+		m.typeQuery(msg.Text)
 	}
 	return m, nil
+}
+
+// A longer query can only shrink the result list, so the selection goes back
+// to the first match rather than pointing past the end of it.
+func (m *model) typeQuery(text string) {
+	if text == "" {
+		return
+	}
+	for _, r := range text {
+		if unicode.IsPrint(r) && len(m.query) < queryLimit {
+			m.query = append(m.query, r)
+		}
+	}
+	m.cursor = 0
 }
 
 func (m model) open(item Item) (tea.Model, tea.Cmd) {

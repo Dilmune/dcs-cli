@@ -3,15 +3,18 @@ package ui
 import (
 	"bytes"
 	"fmt"
+	"image/color"
 	"io"
-	"runtime"
+	"os"
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/huh/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStatusConstants(t *testing.T) {
@@ -40,14 +43,27 @@ func TestBillingConstants(t *testing.T) {
 
 func withTrueColor(t *testing.T) {
 	t.Helper()
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	prev, prevMode := painter, CurrentMode()
+	t.Cleanup(func() {
+		painter = prev
+		applyMode(prevMode)
+	})
+	painter = testPainter(false)
+	applyMode(prevMode)
 }
 
-func rgbSeq(c lipgloss.Color) string {
-	r, g, b := hexToRGB(string(c))
-	return fmt.Sprintf("38;2;%d;%d;%d", r, g, b)
+// testPainter pins how much color the styles carry, so a recorded byte is the
+// same on any machine.
+func testPainter(plainOutput bool) Painter {
+	if plainOutput {
+		return NewPainter(colorprofile.NoTTY)
+	}
+	return NewPainter(colorprofile.TrueColor)
+}
+
+func rgbSeq(c color.Color) string {
+	v := toRGB(c)
+	return fmt.Sprintf("38;2;%d;%d;%d", v[0], v[1], v[2])
 }
 
 func TestResolveMode(t *testing.T) {
@@ -74,45 +90,25 @@ func TestResolveMode(t *testing.T) {
 	}
 }
 
-// terminalRecorder stands in for a terminal that never answers: it satisfies
-// termenv's File, so a renderer on it will query, and it keeps every byte the
-// renderer writes, so a query cannot go unnoticed.
+// terminalRecorder stands in for a terminal that never answers: it keeps every
+// byte written to it, so a background query cannot go unnoticed.
 type terminalRecorder struct{ bytes.Buffer }
 
-func (*terminalRecorder) Read([]byte) (int, error) { return 0, io.EOF }
-func (*terminalRecorder) Fd() uintptr              { return 0 }
-
-type terminalEnv map[string]string
-
-func (e terminalEnv) Environ() []string {
-	env := make([]string, 0, len(e))
-	for key, value := range e {
-		env = append(env, key+"="+value)
+// recordingDetector is a background detection that leaves the trace a real one
+// leaves: the query goes to the terminal before the answer comes back.
+func recordingDetector(tty io.Writer, detected bool, calls *int) func() bool {
+	return func() bool {
+		*calls++
+		_, _ = io.WriteString(tty, ansi.RequestBackgroundColor)
+		return detected
 	}
-	return env
 }
 
-func (e terminalEnv) Getenv(key string) string { return e[key] }
-
-func withRecordingRenderer(t *testing.T) *terminalRecorder {
-	t.Helper()
-	prevRenderer, prevPlain := lipgloss.DefaultRenderer(), plain
+func TestRecordingDetectorWritesABackgroundQuery(t *testing.T) {
 	tty := &terminalRecorder{}
-	lipgloss.SetDefaultRenderer(lipgloss.NewRenderer(tty, termenv.WithUnsafe(), termenv.WithEnvironment(terminalEnv{"TERM": "xterm-256color"})))
-	t.Cleanup(func() {
-		lipgloss.SetDefaultRenderer(prevRenderer)
-		plain = prevPlain
-		applyMode(ModeDark)
-	})
-	return tty
-}
-
-func TestRecordingRendererSeesALazyBackgroundQuery(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("termenv never queries the terminal on Windows: its backgroundColor returns a fixed default, so there is no query to control for")
-	}
-	tty := withRecordingRenderer(t)
-	lipgloss.HasDarkBackground()
+	calls := 0
+	recordingDetector(tty, true, &calls)()
+	assert.Equal(t, 1, calls)
 	assert.Contains(t, tty.String(), "\x1b]11;?", "without this control the empty-recorder checks below prove nothing")
 }
 
@@ -135,34 +131,41 @@ func TestInitMode_OnlyAutoOnAColorTerminalConsultsTheDetector(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tty := withRecordingRenderer(t)
+			withStyles(t, tc.theme, tc.plain)
+			tty := &terminalRecorder{}
 			detections := 0
-			initMode(tc.theme, tc.plain, func() bool {
-				detections++
-				return tc.detected
-			})
+			initMode(tc.theme, testPainter(tc.plain), recordingDetector(tty, tc.detected, &detections))
 
 			assert.Equal(t, tc.wantDetect, detections)
 			assert.Equal(t, tc.wantMode, CurrentMode())
 			assert.Equal(t, tc.plain, IsPlain())
-			assert.Equal(t, tc.wantMode.HasDarkBackground(), lipgloss.HasDarkBackground(), "the default renderer carries the resolved background")
-			assert.Empty(t, tty.String(), "an explicit background leaves the renderer nothing to query")
+			assert.Equal(t,
+				huh.ThemeCharm(tc.wantMode.HasDarkBackground()).Focused.Description.GetForeground(),
+				promptTheme().Theme(!tc.wantMode.HasDarkBackground()).Focused.Description.GetForeground(),
+				"prompts follow the resolved mode, not the background huh offers to detect")
+			if tc.wantDetect == 0 {
+				assert.Empty(t, tty.String(), "an explicit background leaves nothing to query")
+			}
 		})
 	}
 }
 
-func TestInit_PlainNeverReachesTheRendererDetector(t *testing.T) {
-	tty := withRecordingRenderer(t)
-	Init(string(ModeAuto), true)
-	assert.True(t, lipgloss.HasDarkBackground())
+func TestInitMode_PlainNeverReachesTheDetector(t *testing.T) {
+	withStyles(t, ModeAuto, true)
+	tty := &terminalRecorder{}
+	detections := 0
+	initMode(ModeAuto, testPainter(true), recordingDetector(tty, false, &detections))
+	assert.Zero(t, detections)
 	assert.Empty(t, tty.String())
+	assert.Equal(t, ModeDark, CurrentMode())
+	assert.Equal(t, colorprofile.NoTTY, painter.profile, "prompts render through this profile, so plain output stays silent")
 }
 
 type rgb [3]int
 
-func toRGB(c lipgloss.Color) rgb {
-	r, g, b := hexToRGB(string(c))
-	return rgb{r, g, b}
+func toRGB(c color.Color) rgb {
+	r, g, b, _ := c.RGBA()
+	return rgb{int(r >> 8), int(g >> 8), int(b >> 8)}
 }
 
 // Golden sRGB values for the OKLCH table in docs/DESIGN.md, kept as decimal
@@ -184,6 +187,7 @@ func TestPalette_MatchesDesignTable(t *testing.T) {
 
 func TestApplyMode_RebuildsEveryStyleFromTheTokens(t *testing.T) {
 	t.Cleanup(func() { applyMode(ModeDark) })
+	withTrueColor(t)
 	for _, mode := range []Mode{ModeLight, ModeDim, ModeDark} {
 		applyMode(mode)
 		want := Palette(mode)
@@ -202,11 +206,7 @@ func TestApplyMode_RebuildsEveryStyleFromTheTokens(t *testing.T) {
 
 func TestInit_PlainOutputHasNoEscapes(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
-	prev := lipgloss.ColorProfile()
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(prev)
-		applyMode(ModeDark)
-	})
+	withStyles(t, ModeLight, true)
 	Init(string(ModeLight), true)
 	assert.True(t, IsPlain())
 	assert.Equal(t, ModeDark, CurrentMode(), "plain output never queries the terminal")
@@ -218,11 +218,7 @@ func TestInit_PlainOutputHasNoEscapes(t *testing.T) {
 
 func TestInit_NoColorEnvIsPlain(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
-	prev := lipgloss.ColorProfile()
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(prev)
-		applyMode(ModeDark)
-	})
+	withStyles(t, ModeDark, true)
 	Init(string(ModeDark), false)
 	assert.True(t, IsPlain())
 	assert.Equal(t, "✓", Success.Render("✓"))
@@ -235,7 +231,7 @@ func TestStatus_GlyphWordAndToken(t *testing.T) {
 		name     string
 		statuses []string
 		glyph    string
-		color    lipgloss.Color
+		color    color.Color
 	}{
 		{"healthy", []string{StatusActive, StatusRunning, StatusDeployed, StatusCompleted, StatusSuccess, StatusEnabled}, GlyphHealthy, tokens.Success},
 		{"in progress", []string{StatusProvisioning, StatusInstalling, StatusDeploying, StatusBuilding, StatusPending}, GlyphInProgress, tokens.Warning},
@@ -267,4 +263,36 @@ func TestWithStatusColumns_CopiesAndLeavesInputPlain(t *testing.T) {
 	assert.Equal(t, "○ off", ansi.Strip(got[0][2]))
 	assert.Equal(t, "✕ failed", ansi.Strip(got[1][1]))
 	assert.Equal(t, "web-2", got[1][0])
+}
+
+// withStyles pins the palette and the terminal's color support for one test,
+// so a recorded golden is the same bytes on any machine.
+func withStyles(t *testing.T, m Mode, plainOutput bool) {
+	t.Helper()
+	prevPainter, prevPlain, prevMode := painter, plain, CurrentMode()
+	t.Cleanup(func() {
+		painter, plain = prevPainter, prevPlain
+		applyMode(prevMode)
+	})
+	initMode(m, testPainter(plainOutput), nil)
+}
+
+// captureStdout collects what print writes to stdout. The reader runs while
+// print does, so output larger than the pipe buffer cannot deadlock it.
+func captureStdout(t *testing.T, print func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	prev := os.Stdout
+	os.Stdout = w
+	captured := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		captured <- buf.String()
+	}()
+	print()
+	os.Stdout = prev
+	require.NoError(t, w.Close())
+	return <-captured
 }

@@ -2,11 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 )
 
@@ -48,7 +49,7 @@ func PrintBanner(version string) {
 }
 
 func printCompactBanner(version string, noColor bool) {
-	dcsStyle := Accent.Bold(true)
+	dcsStyle := painter.Emphasize(Accent)
 	nameStyle := Muted
 	verStyle := Muted
 	fmt.Printf("  %s  %s  %s\n",
@@ -103,14 +104,13 @@ func renderGradientLine(line string, noColor bool) string {
 
 	var b strings.Builder
 	for i, r := range runes {
-		color := interpolateGradient(bannerGradient, float64(i)/float64(divisor))
-		style := lipgloss.NewStyle().Foreground(color).Bold(true)
-		b.WriteString(style.Render(string(r)))
+		stop := interpolateGradient(bannerGradient, float64(i)/float64(divisor))
+		b.WriteString(painter.Emphasize(painter.Token(stop)).Render(string(r)))
 	}
 	return b.String()
 }
 
-func interpolateGradient(stops []lipgloss.Color, t float64) lipgloss.Color {
+func interpolateGradient(stops []color.RGBA, t float64) color.RGBA {
 	if t <= 0 || len(stops) < 2 {
 		return stops[0]
 	}
@@ -125,40 +125,12 @@ func interpolateGradient(stops []lipgloss.Color, t float64) lipgloss.Color {
 	}
 	frac := segment - float64(idx)
 
-	r1, g1, b1 := hexToRGB(string(stops[idx]))
-	r2, g2, b2 := hexToRGB(string(stops[idx+1]))
-
-	r := r1 + int(float64(r2-r1)*frac)
-	g := g1 + int(float64(g2-g1)*frac)
-	bl := b1 + int(float64(b2-b1)*frac)
-
-	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, bl))
+	from, to := stops[idx], stops[idx+1]
+	return color.RGBA{R: lerp(from.R, to.R, frac), G: lerp(from.G, to.G, frac), B: lerp(from.B, to.B, frac), A: 0xff}
 }
 
-func hexToRGB(hex string) (int, int, int) {
-	if len(hex) > 0 && hex[0] == '#' {
-		hex = hex[1:]
-	}
-	if len(hex) != 6 {
-		return 0, 0, 0
-	}
-	r := hexByte(hex[0])<<4 | hexByte(hex[1])
-	g := hexByte(hex[2])<<4 | hexByte(hex[3])
-	b := hexByte(hex[4])<<4 | hexByte(hex[5])
-	return int(r), int(g), int(b)
-}
-
-func hexByte(c byte) byte {
-	switch {
-	case c >= '0' && c <= '9':
-		return c - '0'
-	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10
-	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10
-	default:
-		return 0
-	}
+func lerp(from, to uint8, frac float64) uint8 {
+	return uint8(int(from) + int(float64(int(to)-int(from))*frac))
 }
 
 // TerminalWidth is the stdout column count for layout, 80 when stdout is
@@ -183,7 +155,7 @@ func PrintCommands() {
 	}
 
 	headerStyle := Bold
-	cmdStyle := Accent.Bold(true).Width(commandColumnWidth)
+	cmdStyle := painter.Emphasize(Accent).Width(commandColumnWidth)
 	descStyle := Muted
 	sectionStyle := Bold
 	hintStyle := Muted

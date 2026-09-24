@@ -4,8 +4,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
 
 	"github.com/dilmune/dcs-cli/internal/ui"
 )
@@ -13,37 +12,29 @@ import (
 type styles struct {
 	title, muted, accent, rule, success, warning, danger lipgloss.Style
 	logoFace, logoSide, logoAccent                       lipgloss.Style
+	selected                                             lipgloss.Style
 	asciiLogo                                            bool
 }
 
 // Colors come from the ui token table; the workspace owns nothing but the
-// logo palette. The user's background and body color stay intact.
+// logo inks. The user's background and body color stay intact.
 func newStyles(out io.Writer, mode ui.Mode, plain bool) styles {
-	return workspaceStyles(newRenderer(out, mode, plain), mode)
+	return workspaceStyles(ui.NewPainter(ui.TerminalProfile(out, plain)), mode)
 }
 
-// newRenderer takes the mode ui.Init resolved instead of detecting its own, so
-// the workspace never queries the terminal a second time.
-func newRenderer(out io.Writer, mode ui.Mode, plain bool) *lipgloss.Renderer {
-	r := lipgloss.NewRenderer(out)
-	if plain {
-		r.SetColorProfile(termenv.Ascii)
-	}
-	r.SetHasDarkBackground(mode.HasDarkBackground())
-	return r
-}
-
-func workspaceStyles(r *lipgloss.Renderer, mode ui.Mode) styles {
+// workspaceStyles takes the mode ui.Init resolved and a painter for its own
+// output, so the workspace never queries the terminal a second time.
+func workspaceStyles(p ui.Painter, mode ui.Mode) styles {
 	t := ui.Palette(mode)
-	b := r.NewStyle()
-	face, side, terracotta := logoPalette()
-	return styles{title: b.Bold(true), muted: b.Foreground(t.Muted), accent: b.Foreground(t.Accent), rule: b.Foreground(t.Divider),
-		success: b.Foreground(t.Success), warning: b.Foreground(t.Warning), danger: b.Foreground(t.Danger),
-		logoFace: b.Foreground(face), logoSide: b.Foreground(side), logoAccent: b.Foreground(terracotta), asciiLogo: r.ColorProfile() == termenv.Ascii}
+	face, side, terracotta := logoInks(p)
+	return styles{title: p.Bold(), muted: p.Token(t.Muted), accent: p.Token(t.Accent), rule: p.Token(t.Divider),
+		success: p.Token(t.Success), warning: p.Token(t.Warning), danger: p.Token(t.Danger),
+		logoFace: face, logoSide: side, logoAccent: terracotta,
+		selected: p.Emphasize(p.Token(t.Accent)), asciiLogo: p.Bare()}
 }
 
-// status renders glyph plus word in the workspace's own renderer so its
-// profile and mode apply; ui.Status would use the process-wide styles.
+// status renders glyph plus word in the workspace's own styles so its profile
+// and mode apply; ui.Status would use the process-wide ones.
 func (s styles) status(word string) string {
 	if word == "" {
 		return ""

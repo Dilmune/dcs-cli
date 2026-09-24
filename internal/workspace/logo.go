@@ -3,7 +3,9 @@ package workspace
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+
+	"github.com/dilmune/dcs-cli/internal/ui"
 )
 
 const (
@@ -32,10 +34,10 @@ const (
 // The approved asset uses this fixed terminal palette, independent of menu
 // theme. RGB values match its 256-color cells exactly, avoiding quantization.
 // This is the only place outside ui/theme.go allowed to name a color.
-func logoPalette() (face, side, terracotta lipgloss.CompleteColor) {
-	face = lipgloss.CompleteColor{TrueColor: "#ffffd7", ANSI256: logoCreamANSI256, ANSI: logoCreamANSI}
-	side = lipgloss.CompleteColor{TrueColor: "#ffd7af", ANSI256: logoShadeANSI256, ANSI: logoShadeANSI}
-	terracotta = lipgloss.CompleteColor{TrueColor: "#d7875f", ANSI256: logoTerracottaANSI256, ANSI: logoTerracottaANSI}
+func logoInks(p ui.Painter) (face, side, terracotta lipgloss.Style) {
+	face = p.Fixed(lipgloss.Color(logoCreamANSI), lipgloss.Color(logoCreamANSI256), lipgloss.Color("#ffffd7"))
+	side = p.Fixed(lipgloss.Color(logoShadeANSI), lipgloss.Color(logoShadeANSI256), lipgloss.Color("#ffd7af"))
+	terracotta = p.Fixed(lipgloss.Color(logoTerracottaANSI), lipgloss.Color(logoTerracottaANSI256), lipgloss.Color("#d7875f"))
 	return face, side, terracotta
 }
 

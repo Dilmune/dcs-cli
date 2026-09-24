@@ -168,10 +168,21 @@ capture() {
   printf 'captured %s\n' "$1"
 }
 
+# Why the window lookup found nothing. A live ghostty means the window is there
+# and nothing is drawing it, which is a locked or sleeping display; no process
+# means Ghostty never came up. Read it before quit_ghostty takes the process away.
+window_failure() {
+  if pgrep -x ghostty >/dev/null; then
+    printf 'ghostty is running, so the window exists and nothing is compositing it: the display is locked or asleep'
+  else
+    printf 'no ghostty process is running, so Ghostty failed to launch'
+  fi
+}
+
 # shoot_runner <name> <cols> <rows> <ghostty-theme> <runner> <done-marker>
 # An empty marker means the window renders something already running (tmux).
 shoot_runner() {
-  local id="" attempt
+  local id="" attempt why=""
   for attempt in 1 2; do
     open_ghostty "$2" "$3" "$4" "$5"
     activate_ghostty
@@ -179,10 +190,11 @@ shoot_runner() {
       break
     fi
     id=""
-    printf 'note: no Ghostty window on attempt %s for %s; retrying with a fresh window\n' "$attempt" "$1"
+    why="$(window_failure)"
+    printf 'note: no Ghostty window on attempt %s for %s (%s); retrying with a fresh window\n' "$attempt" "$1" "$why"
     quit_ghostty
   done
-  [ -n "$id" ] || die "no Ghostty window appeared for $1"
+  [ -n "$id" ] || die "no Ghostty window appeared for $1: $why"
   if [ -n "$6" ]; then
     wait_for_file "$6"
   fi

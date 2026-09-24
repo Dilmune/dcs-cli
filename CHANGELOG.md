@@ -1,5 +1,15 @@
 # DCS CLI changes
 
+## 3.9.0 (2026-09-24)
+
+### Fixes
+
+- Commands no longer pause for several seconds before printing. Every run used
+  to ask the terminal what color its background is, even with `--no-color`,
+  `NO_COLOR` or an explicit `--theme`, and a terminal that never answers left
+  you waiting out the timeout. Those three now print straight away. Only
+  automatic theme detection still asks.
+
 ## 3.8.3 (2026-09-22)
 
 ### Fixes
