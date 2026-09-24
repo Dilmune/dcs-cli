@@ -1,12 +1,14 @@
 package ui
 
 import (
-	"fmt"
+	"image/color"
+	"io"
 	"math"
 	"os"
+	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // Mode is the resolved color mode. Tokens are picked once per process from
@@ -22,7 +24,7 @@ const (
 
 // Tokens holds the six semantic colors for one mode.
 type Tokens struct {
-	Accent, Muted, Divider, Success, Warning, Danger lipgloss.Color
+	Accent, Muted, Divider, Success, Warning, Danger color.Color
 }
 
 const (
@@ -70,20 +72,104 @@ func (m Mode) HasDarkBackground() bool {
 	return m != ModeLight && m != ModeDim
 }
 
+// Painter builds styles for one output. It carries how much color that output
+// can show, resolved once from the environment and from whether the output is
+// a terminal, never from a query, so plain output and an explicit --theme stay
+// silent.
+type Painter struct{ profile colorprofile.Profile }
+
+// NewPainter builds a painter for a profile the caller already resolved.
+func NewPainter(p colorprofile.Profile) Painter { return Painter{profile: p} }
+
+// TerminalProfile reports how much color an output can show. Plain output
+// shows nothing at all, which is how --no-color and NO_COLOR drop every escape
+// sequence without touching the layout.
+func TerminalProfile(out io.Writer, plainOutput bool) colorprofile.Profile {
+	if plainOutput {
+		return colorprofile.NoTTY
+	}
+	env := os.Environ()
+	profile := colorprofile.Detect(out, env)
+	if profile > colorprofile.ASCII && profile < colorprofile.TrueColor && tmuxCarriesTrueColor(env) {
+		return colorprofile.TrueColor
+	}
+	return profile
+}
+
+// tmuxCarriesTrueColor reports whether COLORTERM's 24-bit announcement still
+// holds inside tmux. colorprofile discards COLORTERM for a tmux or screen
+// TERM, which costs every token 16 million colors down to 256. Measured on
+// tmux 3.7b a pane stores the exact 24-bit triple and forwards it to its
+// client, so the announcement holds; GNU Screen, which sets no TMUX, keeps the
+// downgrade it needs.
+func tmuxCarriesTrueColor(env []string) bool {
+	var inTmux, announced bool
+	for _, entry := range env {
+		name, value, _ := strings.Cut(entry, "=")
+		switch name {
+		case "TMUX":
+			inTmux = value != ""
+		case "COLORTERM":
+			switch strings.ToLower(value) {
+			case "truecolor", "24bit":
+				announced = true
+			}
+		}
+	}
+	return inTmux && announced
+}
+
+// Token renders text in one palette token, downgraded to what the output can
+// show. An output with no color renders bare text.
+func (p Painter) Token(c color.Color) lipgloss.Style {
+	return styleFor(p.profile.Convert(c))
+}
+
+// Fixed picks the cell of a fixed terminal palette that matches what the
+// output can show. The workspace logo is the only artwork specified that way.
+func (p Painter) Fixed(ansi, ansi256, truecolor color.Color) lipgloss.Style {
+	return styleFor(lipgloss.Complete(p.profile)(ansi, ansi256, truecolor))
+}
+
+// Bold is the only emphasis docs/DESIGN.md allows, and it leaves with the
+// color when the output carries no escape sequences.
+func (p Painter) Bold() lipgloss.Style { return p.Emphasize(lipgloss.NewStyle()) }
+
+// Emphasize adds bold to a style already carrying a token. Plain output has to
+// keep every escape sequence out, an attribute as much as a color, so there it
+// returns the style untouched.
+func (p Painter) Emphasize(s lipgloss.Style) lipgloss.Style {
+	if p.Bare() {
+		return s
+	}
+	return s.Bold(true)
+}
+
+// Bare reports whether this output renders text with no escape sequence at all.
+func (p Painter) Bare() bool { return p.profile <= colorprofile.ASCII }
+
+func styleFor(c color.Color) lipgloss.Style {
+	if c == nil {
+		return lipgloss.NewStyle()
+	}
+	return lipgloss.NewStyle().Foreground(c)
+}
+
 // Styles default to dark so output before Init (tests, early errors) still
 // resolves to a token; Init rebuilds them for the resolved mode.
 var (
-	mode  = ModeDark
-	plain bool
+	mode    = ModeDark
+	plain   bool
+	painter = NewPainter(TerminalProfile(os.Stdout, false))
 
-	Bold    = lipgloss.NewStyle().Bold(true)
-	Title   = lipgloss.NewStyle().Bold(true)
-	Accent  = lipgloss.NewStyle().Foreground(Palette(ModeDark).Accent)
-	Muted   = lipgloss.NewStyle().Foreground(Palette(ModeDark).Muted)
-	Divider = lipgloss.NewStyle().Foreground(Palette(ModeDark).Divider)
-	Success = lipgloss.NewStyle().Foreground(Palette(ModeDark).Success)
-	Warning = lipgloss.NewStyle().Foreground(Palette(ModeDark).Warning)
-	Error   = lipgloss.NewStyle().Foreground(Palette(ModeDark).Danger)
+	Bold    = painter.Bold()
+	Title   = painter.Bold()
+	Accent  = painter.Token(Palette(ModeDark).Accent)
+	Muted   = painter.Token(Palette(ModeDark).Muted)
+	Divider = painter.Token(Palette(ModeDark).Divider)
+	Success = painter.Token(Palette(ModeDark).Success)
+	Warning = painter.Token(Palette(ModeDark).Warning)
+	Error   = painter.Token(Palette(ModeDark).Danger)
 	Info    = Muted
 
 	bannerGradient = accentGradient(bannerGradientSteps, bannerGradientMinL, bannerGradientMaxL)
@@ -93,13 +179,20 @@ var (
 // then the terminal background, then dark. --no-color, NO_COLOR, a non-TTY
 // stdout and --quiet all disable escape sequences without changing layout.
 func Init(theme string, noColor bool) {
-	initMode(Mode(theme), noColor || isNoColor() || !IsTerminal() || quiet, lipgloss.HasDarkBackground)
+	plainOutput := noColor || isNoColor() || !IsTerminal() || quiet
+	initMode(Mode(theme), NewPainter(TerminalProfile(os.Stdout, plainOutput)), detectDarkBackground)
 }
 
-func initMode(theme Mode, plainOutput bool, detectDark func() bool) {
-	plain = plainOutput
+// detectDarkBackground asks the terminal what it is drawing on. Only auto on a
+// real terminal reaches it; a terminal that never answers costs the query its
+// two-second timeout and then reads as dark.
+func detectDarkBackground() bool {
+	return lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+}
+
+func initMode(theme Mode, p Painter, detectDark func() bool) {
+	painter, plain = p, p.Bare()
 	if plain {
-		lipgloss.SetColorProfile(termenv.Ascii)
 		applyMode(ModeDark)
 		return
 	}
@@ -127,16 +220,15 @@ func IsPlain() bool { return plain }
 
 func applyMode(m Mode) {
 	mode = m
-	// huh and bubbles render AdaptiveColor through the default renderer, which
-	// queries the terminal for its background unless it has been told.
-	lipgloss.SetHasDarkBackground(m.HasDarkBackground())
 	t := Palette(m)
-	Accent = lipgloss.NewStyle().Foreground(t.Accent)
-	Muted = lipgloss.NewStyle().Foreground(t.Muted)
-	Divider = lipgloss.NewStyle().Foreground(t.Divider)
-	Success = lipgloss.NewStyle().Foreground(t.Success)
-	Warning = lipgloss.NewStyle().Foreground(t.Warning)
-	Error = lipgloss.NewStyle().Foreground(t.Danger)
+	Bold = painter.Bold()
+	Title = painter.Bold()
+	Accent = painter.Token(t.Accent)
+	Muted = painter.Token(t.Muted)
+	Divider = painter.Token(t.Divider)
+	Success = painter.Token(t.Success)
+	Warning = painter.Token(t.Warning)
+	Error = painter.Token(t.Danger)
 	Info = Muted
 	bannerGradient = accentGradient(bannerGradientSteps, bannerGradientMinL, bannerGradientMaxL)
 }
@@ -147,8 +239,8 @@ const (
 	bannerGradientMaxL  = .78
 )
 
-func accentGradient(steps int, minL, maxL float64) []lipgloss.Color {
-	stops := make([]lipgloss.Color, steps)
+func accentGradient(steps int, minL, maxL float64) []color.RGBA {
+	stops := make([]color.RGBA, steps)
 	for i := range stops {
 		l := minL + (maxL-minL)*float64(i)/float64(steps-1)
 		stops[i] = oklch(l, accentChroma, accentHue)
@@ -160,23 +252,27 @@ func isNoColor() bool {
 	return os.Getenv("NO_COLOR") != ""
 }
 
-func oklch(l, c, h float64) lipgloss.Color {
+func oklch(l, c, h float64) color.RGBA {
 	h *= math.Pi / 180
 	a, b := c*math.Cos(h), c*math.Sin(h)
 	x := math.Pow(l+.3963377774*a+.2158037573*b, 3)
 	y := math.Pow(l-.1055613458*a-.0638541728*b, 3)
 	z := math.Pow(l-.0894841775*a-1.291485548*b, 3)
-	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", srgb(4.0767416621*x-3.3077115913*y+.2309699292*z),
-		srgb(-1.2684380046*x+2.6097574011*y-.3413193965*z), srgb(-.0041960863*x-.7034186147*y+1.707614701*z)))
+	return color.RGBA{
+		R: srgb(4.0767416621*x - 3.3077115913*y + .2309699292*z),
+		G: srgb(-1.2684380046*x + 2.6097574011*y - .3413193965*z),
+		B: srgb(-.0041960863*x - .7034186147*y + 1.707614701*z),
+		A: 0xff,
+	}
 }
 
-func srgb(v float64) int {
+func srgb(v float64) uint8 {
 	if v <= .0031308 {
 		v *= 12.92
 	} else {
 		v = 1.055*math.Pow(v, 1/2.4) - .055
 	}
-	return int(math.Round(max(0, min(1, v)) * 255))
+	return uint8(math.Round(max(0, min(1, v)) * 255))
 }
 
 // Resource statuses.

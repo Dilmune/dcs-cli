@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
@@ -29,18 +29,12 @@ func newLoginCmd() *cobra.Command {
 			fmt.Println(ui.Muted.Render("  Create one in your portal under Settings → API Keys."))
 			fmt.Println()
 
-			var method string
-			err := huh.NewSelect[string]().
-				Title("How would you like to authenticate?").
-				Options(
-					huh.NewOption("Open portal to create a key", "browser"),
-					huh.NewOption("Paste an existing API key", "paste"),
-				).
-				Value(&method).
-				WithTheme(ui.NewTheme()).
-				Run()
+			method, err := ui.SelectOption("How would you like to authenticate?", []huh.Option[string]{
+				huh.NewOption("Open portal to create a key", "browser"),
+				huh.NewOption("Paste an existing API key", "paste"),
+			})
 			if err != nil {
-				return fmt.Errorf("Run: %w", err)
+				return fmt.Errorf("select an authentication method: %w", err)
 			}
 
 			if method == "browser" {

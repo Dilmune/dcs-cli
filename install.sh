@@ -63,13 +63,15 @@ fetch() {
 }
 
 # Stable tags only: vX.Y.Z with nothing else, so a header suffix such as
-# wget's " [following]" can never leak into a download URL.
+# wget's " [following]" can never leak into a download URL. The character-set
+# case runs first and carries the embedded-newline rejection on its own: grep
+# reads the value as lines, so a valid first line with junk after a newline
+# would match the pattern. The pattern itself is install.ps1's regex.
 is_release_tag() {
   case "$1" in
     *[!v0-9.]*) return 1 ;;
-    v[0-9]*.[0-9]*.[0-9]*) return 0 ;;
-    *) return 1 ;;
   esac
+  printf '%s\n' "$1" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
 }
 
 # latest_tag_from_redirect: the release page redirects to /releases/tag/vX.Y.Z

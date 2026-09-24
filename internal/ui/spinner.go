@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 )
 
 const spinnerFrameInterval = 80 * time.Millisecond
@@ -38,7 +38,7 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinnerDoneMsg:
 		m.done = true
 		return m, tea.Quit
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m, tea.Quit
 	}
 	var cmd tea.Cmd
@@ -46,11 +46,11 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m spinnerModel) View() string {
+func (m spinnerModel) View() tea.View {
 	if m.done {
-		return ""
+		return tea.NewView("")
 	}
-	return fmt.Sprintf("  %s %s", m.spinner.View(), Muted.Render(m.message))
+	return tea.NewView(fmt.Sprintf("  %s %s", m.spinner.View(), Muted.Render(m.message)))
 }
 
 // RunWithSpinner shows a spinner while executing the given function.
@@ -62,7 +62,7 @@ func RunWithSpinner(message string, fn func() error) error {
 	}
 
 	errCh := make(chan error, 1)
-	p := tea.NewProgram(newSpinnerModel(message))
+	p := tea.NewProgram(newSpinnerModel(message), tea.WithColorProfile(painter.profile))
 
 	go func() {
 		err := fn()

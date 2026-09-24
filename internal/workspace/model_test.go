@@ -10,10 +10,9 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,7 +28,7 @@ func testModel() model {
 		{ID: "access", Title: "Access", Body: "Keys"},
 		{ID: "operations", Title: "Operations", Body: "Logs"},
 	}}
-	m := newModel(Options{Output: io.Discard, Catalog: root, NoColor: true, Mode: ui.ModeLight, RememberWelcome: func() error { return nil }})
+	m := newModel(Options{Output: io.Discard, Catalog: root, NoColor: true, Mode: ui.ModeLight, RememberWelcome: func() error { return nil }}, colorprofile.NoTTY)
 	m.identify = func() tea.Msg { return identityMsg{name: "Test account"} }
 	m.fetch = func(req Request, generation int) (tea.Cmd, context.CancelFunc) {
 		return func() tea.Msg {
@@ -69,61 +68,87 @@ func loadedFrom(t *testing.T, command tea.Cmd) loadedMsg {
 	return loadedMsg{}
 }
 
-func press(m model, key tea.KeyType, runes ...rune) (model, tea.Cmd) {
-	next, cmd := m.Update(tea.KeyMsg{Type: key, Runes: runes})
+func press(m model, key tea.KeyPressMsg) (model, tea.Cmd) {
+	next, cmd := m.Update(key)
 	return next.(model), cmd
+}
+
+// typed is the press a terminal sends for one printable character, space
+// included. named is a key that carries no text, ctrl a control combination.
+func typed(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
+func named(c rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: c} }
+func ctrl(r rune) tea.KeyPressMsg  { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
+
+// typeText types a run of characters. Bubble Tea v2 reports one press per
+// character where v1 batched a whole run into a single event.
+func typeText(m model, text string) (model, tea.Cmd) {
+	var commands []tea.Cmd
+	for _, r := range text {
+		next, command := press(m, typed(r))
+		m = next
+		commands = append(commands, command)
+	}
+	return m, tea.Batch(commands...)
 }
 
 func TestWorkspaceNavigationSearchAndInertReferences(t *testing.T) {
 	m := testModel()
 	var command tea.Cmd
-	m, command = press(m, tea.KeyRunes, '3')
+	m, command = press(m, typed('3'))
 	assert.Equal(t, "Databases", m.current.Title)
 	assert.Nil(t, command)
-	m, _ = press(m, tea.KeyRunes, []rune("/delete")...)
+	m, _ = typeText(m, "/delete")
 	require.True(t, m.searching)
 	require.Len(t, m.results(), 1)
-	m, command = press(m, tea.KeyEnter)
+	m, command = press(m, named(tea.KeyEnter))
 	assert.Equal(t, "dcs storage delete", m.current.Title)
 	assert.Nil(t, command, "opening a mutating command must never execute it")
-	assert.Contains(t, m.View(), "NOT EXECUTED")
-	m, _ = press(m, tea.KeyEsc)
+	assert.Contains(t, m.render(), "NOT EXECUTED")
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.Equal(t, "Databases", m.current.Title)
-	assert.NotPanics(t, func() { m.View() })
-	m, _ = press(m, tea.KeyRunes, '0')
+	assert.NotPanics(t, func() { m.render() })
+	m, _ = press(m, typed('0'))
 	assert.True(t, m.isHome())
-	m, _ = press(m, tea.KeyRunes, '6')
+	m, _ = press(m, typed('6'))
 	assert.Equal(t, "Operations", m.current.Title)
 }
 
 func TestWorkspaceSearchRestoresCursorAndPasteIsNeverAnAction(t *testing.T) {
 	m := testModel()
 	m.cursor = 5
-	m, _ = press(m, tea.KeyRunes, '/')
-	m, _ = press(m, tea.KeyRunes, []rune("schema")...)
-	m, _ = press(m, tea.KeyEnter)
-	m, _ = press(m, tea.KeyEsc)
+	m, _ = press(m, typed('/'))
+	m, _ = typeText(m, "schema")
+	m, _ = press(m, named(tea.KeyEnter))
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.Equal(t, 5, m.cursor)
-	assert.NotPanics(t, func() { m.View() })
-	next, command := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q\rdelete"), Paste: true})
+	assert.NotPanics(t, func() { m.render() })
+	next, command := m.Update(tea.PasteMsg{Content: "q\rdelete"})
 	m = next.(model)
 	assert.Nil(t, command)
 	assert.True(t, m.searching)
 	assert.Equal(t, "qdelete", string(m.query))
-	m, _ = press(m, tea.KeyCtrlU)
+	m, _ = press(m, ctrl('u'))
 	assert.Empty(t, m.query)
-	m, _ = press(m, tea.KeyRunes, []rune("no such command")...)
-	m, command = press(m, tea.KeyEnter)
+	m, _ = typeText(m, "no such command")
+	m, command = press(m, named(tea.KeyEnter))
 	assert.Nil(t, command)
-	assert.Contains(t, m.View(), "No matches")
-	m, _ = press(m, tea.KeyEsc)
+	assert.Contains(t, m.render(), "No matches")
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.Equal(t, 5, m.cursor)
+
+	m, _ = press(m, typed('?'))
+	require.True(t, m.help)
+	next, command = m.Update(tea.PasteMsg{Content: "servers"})
+	m = next.(model)
+	assert.Nil(t, command)
+	assert.False(t, m.searching, "a paste behind the help overlay must not open a search the reader cannot see")
+	assert.Empty(t, m.query)
 }
 
 func TestWorkspaceSearchDoesNotDuplicateTheCurrentCommandArea(t *testing.T) {
 	m := testModel()
-	m, _ = press(m, tea.KeyRunes, '3')
-	m, _ = press(m, tea.KeyRunes, []rune("/schema")...)
+	m, _ = press(m, typed('3'))
+	m, _ = typeText(m, "/schema")
 	require.Len(t, m.results(), 1)
 	assert.Equal(t, "schema", m.results()[0].item.ID)
 }
@@ -136,18 +161,14 @@ func TestWorkspaceSearchPreservesTypedAndPastedSpaces(t *testing.T) {
 				m.root.Children = []Item{{ID: "target", Title: query, Command: query, Body: "Reference"}}
 				m.current = m.root
 				if pasted {
-					next, command := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(query), Paste: true})
+					next, command := m.Update(tea.PasteMsg{Content: query})
 					m = next.(model)
 					require.Nil(t, command)
 				} else {
-					m, _ = press(m, tea.KeyRunes, '/')
+					m, _ = press(m, typed('/'))
 					for _, r := range query {
-						key := tea.KeyRunes
-						if r == ' ' {
-							key = tea.KeySpace
-						}
 						var command tea.Cmd
-						m, command = press(m, key, r)
+						m, command = press(m, typed(r))
 						require.Nil(t, command)
 					}
 				}
@@ -155,7 +176,7 @@ func TestWorkspaceSearchPreservesTypedAndPastedSpaces(t *testing.T) {
 				require.Equal(t, query, string(m.query))
 				require.Len(t, m.results(), 1)
 				assert.Equal(t, "target", m.results()[0].item.ID)
-				m, command := press(m, tea.KeyEnter)
+				m, command := press(m, named(tea.KeyEnter))
 				assert.Equal(t, "target", m.current.ID)
 				assert.Nil(t, command, "a search result must remain an inert command reference")
 			})
@@ -166,25 +187,25 @@ func TestWorkspaceSearchPreservesTypedAndPastedSpaces(t *testing.T) {
 func TestWorkspaceSearchSpaceLimitAndEditing(t *testing.T) {
 	m := testModel()
 	m.cursor = 5
-	m, _ = press(m, tea.KeyRunes, '/')
-	m, _ = press(m, tea.KeyRunes, []rune(strings.Repeat("界", queryLimit-1))...)
+	m, _ = press(m, typed('/'))
+	m, _ = typeText(m, strings.Repeat("界", queryLimit-1))
 	m.cursor = 3
-	m, _ = press(m, tea.KeySpace, ' ')
+	m, _ = press(m, typed(' '))
 	require.Equal(t, strings.Repeat("界", queryLimit-1)+" ", string(m.query))
 	assert.Zero(t, m.cursor)
-	m, _ = press(m, tea.KeySpace, ' ')
-	m, _ = press(m, tea.KeyRunes, 'x')
+	m, _ = press(m, typed(' '))
+	m, _ = press(m, typed('x'))
 	require.Len(t, m.query, queryLimit)
-	m, _ = press(m, tea.KeyBackspace)
+	m, _ = press(m, named(tea.KeyBackspace))
 	require.Equal(t, strings.Repeat("界", queryLimit-1), string(m.query))
-	m, _ = press(m, tea.KeySpace, ' ')
-	m, _ = press(m, tea.KeyCtrlH)
+	m, _ = press(m, typed(' '))
+	m, _ = press(m, ctrl('h'))
 	require.Len(t, m.query, queryLimit-1)
-	m, _ = press(m, tea.KeyCtrlU)
+	m, _ = press(m, ctrl('u'))
 	assert.Empty(t, m.query)
-	m, _ = press(m, tea.KeySpace, ' ')
+	m, _ = press(m, typed(' '))
 	require.Equal(t, " ", string(m.query))
-	m, _ = press(m, tea.KeyEsc)
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.False(t, m.searching)
 	assert.Empty(t, m.query)
 	assert.Equal(t, 5, m.cursor)
@@ -192,41 +213,41 @@ func TestWorkspaceSearchSpaceLimitAndEditing(t *testing.T) {
 
 func TestWorkspaceLoadsRefreshesAndCancelsStaleResults(t *testing.T) {
 	m := testModel()
-	m, _ = press(m, tea.KeyRunes, '1')
-	m, command := press(m, tea.KeyEnter)
+	m, _ = press(m, typed('1'))
+	m, command := press(m, named(tea.KeyEnter))
 	require.True(t, m.pending)
 	require.NotNil(t, command)
 	oldMessage := loadedFrom(t, command)
 	canceled := false
 	m.cancelLoad = func() { canceled = true }
-	m, _ = press(m, tea.KeyEsc)
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.True(t, canceled)
 	next, _ := m.Update(oldMessage)
 	m = next.(model)
 	assert.Equal(t, "Servers", m.current.Title)
-	m, command = press(m, tea.KeyEnter)
+	m, command = press(m, named(tea.KeyEnter))
 	next, _ = m.Update(loadedFrom(t, command))
 	m = next.(model)
 	assert.False(t, m.pending)
 	assert.Equal(t, "Fixture server", m.current.Children[0].Title)
-	m, command = press(m, tea.KeyRunes, 'r')
+	m, command = press(m, typed('r'))
 	assert.True(t, m.pending, "refresh must return the modified model, not its old value")
 	require.NotNil(t, command)
-	m, _ = press(m, tea.KeyRunes, '4')
-	m, command = press(m, tea.KeyEsc)
+	m, _ = press(m, typed('4'))
+	m, command = press(m, named(tea.KeyEscape))
 	assert.True(t, m.pending, "returning to a pending view restarts its canceled read")
 	require.NotNil(t, command)
 }
 
 func TestWorkspaceLoadingIndicatorWaitsForSlowReadsOnly(t *testing.T) {
 	m := testModel()
-	m, _ = press(m, tea.KeyRunes, '1')
+	m, _ = press(m, typed('1'))
 	// The tick's timer starts inside load(), so the clock must start before Enter.
 	started := time.Now()
-	m, command := press(m, tea.KeyEnter)
+	m, command := press(m, named(tea.KeyEnter))
 	require.True(t, m.pending)
 	assert.False(t, m.loading, "a read that just started has nothing to show yet")
-	assert.NotContains(t, m.View(), "Loading...")
+	assert.NotContains(t, m.render(), "Loading...")
 
 	messages := settle(t, command)
 	var loaded loadedMsg
@@ -248,25 +269,25 @@ func TestWorkspaceLoadingIndicatorWaitsForSlowReadsOnly(t *testing.T) {
 	fastModel := fast.(model)
 	assert.False(t, fastModel.pending)
 	assert.False(t, fastModel.loading, "a tick landing after the read finished must not light the indicator")
-	assert.NotContains(t, fastModel.View(), "Loading...")
+	assert.NotContains(t, fastModel.render(), "Loading...")
 	assert.Equal(t, "Fixture server", fastModel.current.Children[0].Title)
 
 	slow, _ := m.Update(tick)
 	slowModel := slow.(model)
 	assert.True(t, slowModel.loading, "a read still pending when the tick fires shows the indicator")
-	assert.Contains(t, slowModel.View(), "Loading...")
+	assert.Contains(t, slowModel.render(), "Loading...")
 	assert.Contains(t, slowModel.footer(), "esc cancel request")
 	slow, _ = slowModel.Update(loaded)
 	slowModel = slow.(model)
 	assert.False(t, slowModel.loading)
-	assert.NotContains(t, slowModel.View(), "Loading...")
+	assert.NotContains(t, slowModel.render(), "Loading...")
 
-	canceledModel, _ := press(m, tea.KeyEsc)
+	canceledModel, _ := press(m, named(tea.KeyEscape))
 	canceled, _ := canceledModel.Update(tick)
 	canceledModel = canceled.(model)
 	assert.False(t, canceledModel.pending)
 	assert.False(t, canceledModel.loading, "a tick from a canceled read must not light the indicator")
-	assert.NotContains(t, canceledModel.View(), "Loading...")
+	assert.NotContains(t, canceledModel.render(), "Loading...")
 }
 
 func TestWorkspaceFirstRunOpensDirectlyAndRemembersOnlyOnNavigation(t *testing.T) {
@@ -279,21 +300,21 @@ func TestWorkspaceFirstRunOpensDirectlyAndRemembersOnlyOnNavigation(t *testing.T
 	m = next.(model)
 	assert.Equal(t, "Test account", m.account)
 	for _, title := range []string{"Servers", "Sites & deploys", "Databases", "Storage", "Access", "Operations"} {
-		assert.Contains(t, m.View(), title, "all six areas must be visible before any keypress")
+		assert.Contains(t, m.render(), title, "all six areas must be visible before any keypress")
 	}
-	assert.Equal(t, 1, strings.Count(m.View(), "Dilmune Cloud"))
-	assert.Equal(t, 1, strings.Count(m.View(), "Read-only"))
-	assert.NotContains(t, m.View(), "Open workspace")
-	_, command := press(m, tea.KeyRunes, 'q')
+	assert.Equal(t, 1, strings.Count(m.render(), "Dilmune Cloud"))
+	assert.Equal(t, 1, strings.Count(m.render(), "Read-only"))
+	assert.NotContains(t, m.render(), "Open workspace")
+	_, command := press(m, typed('q'))
 	assert.IsType(t, tea.QuitMsg{}, command())
 	assert.Zero(t, remembered)
-	m, command = press(m, tea.KeyDown)
+	m, command = press(m, named(tea.KeyDown))
 	assert.Equal(t, 1, m.cursor)
 	assert.Nil(t, command, "moving the selection must not write preferences")
-	m, _ = press(m, tea.KeyRunes, '?')
+	m, _ = press(m, typed('?'))
 	assert.True(t, m.help)
-	m, _ = press(m, tea.KeyEsc)
-	m, command = press(m, tea.KeyEnter)
+	m, _ = press(m, named(tea.KeyEscape))
+	m, command = press(m, named(tea.KeyEnter))
 	assert.False(t, m.welcome)
 	assert.Equal(t, "Sites & deploys", m.current.Title, "Enter opens the selected area, not another welcome screen")
 	require.NotNil(t, command)
@@ -302,7 +323,7 @@ func TestWorkspaceFirstRunOpensDirectlyAndRemembersOnlyOnNavigation(t *testing.T
 	assert.Equal(t, 1, remembered)
 	assert.Equal(t, "Test account", m.account)
 	next, _ = m.Update(welcomeSavedMsg{err: errors.New("readonly disk")})
-	assert.Contains(t, next.(model).View(), "Welcome preference could not be saved")
+	assert.Contains(t, next.(model).render(), "Welcome preference could not be saved")
 }
 
 func TestWorkspaceFirstRunSearchDoesNotNeedAnExtraEnter(t *testing.T) {
@@ -314,17 +335,17 @@ func TestWorkspaceFirstRunSearchDoesNotNeedAnExtraEnter(t *testing.T) {
 		t.Fatal("opening a command reference must not fetch a resource")
 		return nil, nil
 	}
-	m, command := press(m, tea.KeyRunes, []rune("/schema")...)
+	m, command := typeText(m, "/schema")
 	require.True(t, m.searching)
 	assert.Nil(t, command)
 	assert.Zero(t, remembered)
-	m, command = press(m, tea.KeyEnter)
+	m, command = press(m, named(tea.KeyEnter))
 	assert.Equal(t, "dcs db schema", m.current.Title)
 	assert.False(t, m.welcome)
 	require.NotNil(t, command)
 	assert.IsType(t, welcomeSavedMsg{}, command(), "the only side effect is the local intro marker")
 	assert.Equal(t, 1, remembered)
-	m, _ = press(m, tea.KeyEsc)
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.True(t, m.isHome())
 	assert.False(t, m.welcome, "returning home must not replay the introduction")
 }
@@ -351,7 +372,7 @@ func TestWorkspaceLayoutBoundsAndWelcomeControls(t *testing.T) {
 					case "loading":
 						m.loading = true
 					}
-					view := m.View()
+					view := m.render()
 					assert.NotContains(t, view, "\x1b")
 					lines := strings.Split(view, "\n")
 					assert.Len(t, lines, size[1])
@@ -385,17 +406,17 @@ func TestWorkspaceSanitizesUntrustedText(t *testing.T) {
 
 func TestWorkspaceHelpAndLongDetailsScroll(t *testing.T) {
 	m := testModel()
-	m, _ = press(m, tea.KeyRunes, '?')
+	m, _ = press(m, typed('?'))
 	assert.True(t, m.help)
-	m, _ = press(m, tea.KeyPgDown)
+	m, _ = press(m, named(tea.KeyPgDown))
 	assert.Positive(t, m.scroll)
-	m, _ = press(m, tea.KeyEsc)
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.False(t, m.help)
 	m.current = Item{Title: "Long", Body: strings.Repeat("line\n", 100)}
-	assert.Contains(t, m.View(), "PgDn")
-	m, _ = press(m, tea.KeyPgDown)
+	assert.Contains(t, m.render(), "PgDn")
+	m, _ = press(m, named(tea.KeyPgDown))
 	assert.Positive(t, m.scroll)
-	m, _ = press(m, tea.KeyPgUp)
+	m, _ = press(m, named(tea.KeyPgUp))
 	assert.Zero(t, m.scroll)
 }
 
@@ -431,16 +452,13 @@ func TestWorkspaceLogoPixelGeometry(t *testing.T) {
 
 func TestWorkspaceLogoColorProfilesAndLayout(t *testing.T) {
 	for _, theme := range []ui.Mode{ui.ModeLight, ui.ModeDim, ui.ModeDark} {
-		for _, profile := range []termenv.Profile{termenv.TrueColor, termenv.ANSI256, termenv.ANSI, termenv.Ascii} {
-			t.Run(fmt.Sprintf("%s/%d", theme, profile), func(t *testing.T) {
-				r := lipgloss.NewRenderer(io.Discard)
-				r.SetColorProfile(profile)
-				r.SetHasDarkBackground(theme.HasDarkBackground())
+		for _, profile := range []colorprofile.Profile{colorprofile.TrueColor, colorprofile.ANSI256, colorprofile.ANSI, colorprofile.NoTTY} {
+			t.Run(fmt.Sprintf("%s/%s", theme, profile), func(t *testing.T) {
 				m := testModel()
-				m.styles = workspaceStyles(r, theme)
+				m.styles = workspaceStyles(ui.NewPainter(profile), theme)
 				m.welcome = true
 				logo := strings.Join(m.renderLogo(logoWidth), "\n")
-				if profile == termenv.Ascii {
+				if profile == colorprofile.NoTTY {
 					assert.NotContains(t, logo, "\x1b")
 					for _, glyph := range logo {
 						assert.Less(t, glyph, rune(128))
@@ -453,25 +471,27 @@ func TestWorkspaceLogoColorProfilesAndLayout(t *testing.T) {
 						assert.Equal(t, logoWidth, ansi.StringWidth(line))
 					}
 				}
-				if profile == termenv.TrueColor {
+				if profile == colorprofile.TrueColor {
 					assert.Contains(t, logo, "\x1b[38;2;", "must emit RGB, not just bold styling")
 					assert.Contains(t, logo, "48;2;255;255;215", "cream must match the approved palette")
 					assert.Contains(t, logo, "48;2;255;215;175", "shade must match the approved palette")
 					assert.Contains(t, logo, "48;2;215;135;95", "terracotta must match the approved palette")
 				}
-				if profile == termenv.ANSI256 {
+				if profile == colorprofile.ANSI256 {
 					assert.Contains(t, logo, "\x1b[38;5;", "must emit palette colors")
 					assert.Contains(t, logo, "48;5;230", "cream must not quantize to gray")
 					assert.Contains(t, logo, "48;5;223", "shade must not quantize to gray")
 					assert.Contains(t, logo, "48;5;173", "terracotta must match the approved palette")
 				}
-				assert.NotEqual(t, m.styles.logoAccent.GetForeground(), m.styles.logoFace.GetForeground())
+				if profile != colorprofile.NoTTY {
+					assert.NotEqual(t, m.styles.logoAccent.GetForeground(), m.styles.logoFace.GetForeground())
+				}
 				for _, size := range logoSizes() {
 					lines := m.renderLogo(size.width)
 					require.Len(t, lines, size.height)
 					for _, line := range lines {
 						assert.Equal(t, size.width, ansi.StringWidth(line))
-						if profile == termenv.Ascii {
+						if profile == colorprofile.NoTTY {
 							assert.NotContains(t, line, "\x1b")
 							for _, glyph := range line {
 								assert.Less(t, glyph, rune(128))
@@ -481,7 +501,7 @@ func TestWorkspaceLogoColorProfilesAndLayout(t *testing.T) {
 				}
 				for _, size := range [][2]int{{48, 20}, {79, 24}, {80, 20}, {80, 21}, {80, 24}, {110, 32}} {
 					m.width, m.height = size[0], size[1]
-					view := m.View()
+					view := m.render()
 					assert.Contains(t, ansi.Strip(view), "Operations")
 					assert.Contains(t, ansi.Strip(view), "q quit")
 					assert.NotContains(t, view, "PgDn", "the first frame must fit without scrolling")
@@ -517,7 +537,7 @@ func TestWorkspaceWelcomeReflowsWithoutLosingMenuOrSelection(t *testing.T) {
 			assert.Nil(t, command, "resizing must not write the introduction preference")
 			assert.True(t, m.welcome)
 			assert.Equal(t, 5, m.cursor)
-			view := m.View()
+			view := m.render()
 			lines := strings.Split(view, "\n")
 			assert.Len(t, lines, size.height)
 			for _, item := range m.root.Children {
@@ -548,33 +568,33 @@ func TestWorkspaceWelcomeYieldsToFocusedViewsAndNotices(t *testing.T) {
 	m.width, m.height = 110, 27
 	assert.Equal(t, 20, m.responsiveWelcome(m.width-6, m.height-4).logo.width)
 	m.notice = "A local preference could not be saved"
-	view := m.View()
+	view := m.render()
 	assert.Contains(t, view, m.notice)
 	assert.Contains(t, view, "Operations")
 	assert.Contains(t, view, "@@@@", "a notice should select a smaller mark, not remove it")
 	assert.Equal(t, 18, m.responsiveWelcome(m.width-6, m.height-5).logo.width)
 	m.height = 30
-	assert.Contains(t, m.View(), "@@@@")
-	assert.Contains(t, m.View(), m.notice)
+	assert.Contains(t, m.render(), "@@@@")
+	assert.Contains(t, m.render(), m.notice)
 	assert.Equal(t, 20, m.responsiveWelcome(m.width-6, m.height-5).logo.width)
-	m, _ = press(m, tea.KeyRunes, '?')
-	assert.Contains(t, m.View(), "Keyboard shortcuts")
-	assert.NotContains(t, m.View(), "@@@@")
-	m, _ = press(m, tea.KeyEsc)
-	assert.Contains(t, m.View(), "@@@@")
-	m, _ = press(m, tea.KeyRunes, '/')
-	assert.Contains(t, m.View(), "Find a command or resource")
-	assert.NotContains(t, m.View(), "@@@@")
-	m, _ = press(m, tea.KeyEsc)
-	m, command := press(m, tea.KeyEnter)
+	m, _ = press(m, typed('?'))
+	assert.Contains(t, m.render(), "Keyboard shortcuts")
+	assert.NotContains(t, m.render(), "@@@@")
+	m, _ = press(m, named(tea.KeyEscape))
+	assert.Contains(t, m.render(), "@@@@")
+	m, _ = press(m, typed('/'))
+	assert.Contains(t, m.render(), "Find a command or resource")
+	assert.NotContains(t, m.render(), "@@@@")
+	m, _ = press(m, named(tea.KeyEscape))
+	m, command := press(m, named(tea.KeyEnter))
 	assert.Equal(t, "Servers", m.current.Title)
 	assert.False(t, m.welcome)
-	assert.NotContains(t, m.View(), "@@@@")
+	assert.NotContains(t, m.render(), "@@@@")
 	require.NotNil(t, command)
 	assert.IsType(t, welcomeSavedMsg{}, command())
-	m, _ = press(m, tea.KeyEsc)
+	m, _ = press(m, named(tea.KeyEscape))
 	assert.True(t, m.isHome())
-	assert.NotContains(t, m.View(), "@@@@", "opening an area ends the introduction")
+	assert.NotContains(t, m.render(), "@@@@", "opening an area ends the introduction")
 }
 
 func TestWorkspaceLogoHonorsNoColor(t *testing.T) {
@@ -644,7 +664,7 @@ func TestWorkspaceLogoGrowthAndMenuBounds(t *testing.T) {
 					minimumMenuWidth = minimumCompactMenuWidth
 				}
 				assert.LessOrEqual(t, layout.logo.width+layout.gap+minimumMenuWidth, width-6)
-				view := m.View()
+				view := m.render()
 				assert.NotContains(t, view, "PgDn")
 				assert.Contains(t, view, "q quit")
 				assert.Contains(t, view, notice)

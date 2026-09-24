@@ -4,13 +4,22 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 const commandReferenceLabel = "COMMAND REFERENCE · NOT EXECUTED"
 
-func (m model) View() string {
+// Bubble Tea v2 has no alt-screen program option; it is a view field, so every
+// frame declares it.
+func (m model) View() tea.View {
+	view := tea.NewView(m.render())
+	view.AltScreen = true
+	return view
+}
+
+func (m model) render() string {
 	w, h := max(1, m.width), max(1, m.height)
 	if m.isTooSmall() {
 		return canvas([]string{"Dilmune Cloud", "Resize to at least 48 x 20.", "Ctrl+C exits."}, w, h)
@@ -102,7 +111,7 @@ func (m model) homeView(width, capacity int, showDescription bool) []string {
 		label := result.item.Title
 		if i == m.cursor {
 			prefix = m.styles.accent.Render("› ") + m.styles.muted.Render(fmt.Sprintf("%d", i+1)) + "  "
-			label = m.styles.accent.Bold(true).Render(label)
+			label = m.styles.selected.Render(label)
 		}
 		line := prefix + label
 		if inline {
@@ -153,7 +162,7 @@ func (m model) listView(width, capacity int) []string {
 		label = ansi.Truncate(label, leftWidth-2, "…")
 		if i == m.cursor {
 			marker = m.styles.accent.Render("› ")
-			label = m.styles.accent.Bold(true).Render(label)
+			label = m.styles.selected.Render(label)
 		}
 		left = append(left, marker+label)
 		if step == 2 {

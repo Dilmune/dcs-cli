@@ -1,10 +1,10 @@
 package ui
 
 import (
+	"image/color"
 	"os"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -47,13 +47,13 @@ func TestStyled_NoColorSkipsRendering(t *testing.T) {
 }
 
 func TestInterpolateGradient_Boundaries(t *testing.T) {
-	stops := []lipgloss.Color{oklch(0, 0, 0), oklch(1, 0, 0)}
+	stops := []color.RGBA{oklch(0, 0, 0), oklch(1, 0, 0)}
 
 	assert.Equal(t, stops[0], interpolateGradient(stops, 0))
 	assert.Equal(t, stops[0], interpolateGradient(stops, -1))
 	assert.Equal(t, stops[len(stops)-1], interpolateGradient(stops, 1))
 	assert.Equal(t, stops[len(stops)-1], interpolateGradient(stops, 2))
-	assert.Equal(t, stops[0], interpolateGradient([]lipgloss.Color{stops[0]}, 0.5))
+	assert.Equal(t, stops[0], interpolateGradient([]color.RGBA{stops[0]}, 0.5))
 }
 
 func TestBannerGradient_SevenAccentSteps(t *testing.T) {

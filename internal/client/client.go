@@ -14,7 +14,7 @@ import (
 )
 
 // Version is set via ldflags at build time.
-var Version = "3.8.3"
+var Version = "3.9.0"
 
 const (
 	bearerPrefix    = "Bearer "
