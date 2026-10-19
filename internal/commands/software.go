@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
@@ -79,7 +81,7 @@ func newSoftwareInstallCmd() *cobra.Command {
 
 				name, err = ui.SelectOption("Select software to install", softwareOptions)
 				if err != nil {
-					return fmt.Errorf("SelectOption: %w", err)
+					return fmt.Errorf("SelectOption: %w", ui.ExplainNonInteractive(err, "Name the software to install, for example 'dcs software install node'."))
 				}
 			}
 
@@ -104,7 +106,7 @@ func newSoftwareInstallCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&version, "version", "", "Software version to install")
 	return cmd
 }
@@ -134,7 +136,7 @@ func newSoftwareUninstallCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Uninstall %s from this server?", ui.Bold.Render(name)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Uninstall %s from this server?", ui.Bold.Render(name)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -161,7 +163,7 @@ func newSoftwareUninstallCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
@@ -189,21 +191,18 @@ func newSoftwareListCmd() *cobra.Command {
 				return fmt.Errorf("fetch: %w", err)
 			}
 
-			if jsonOutput {
-				server, err := client.Decode[Server](resp)
-				if err != nil {
-					return fmt.Errorf("decode response: %w", err)
-				}
-				ui.PrintJSON(server.InstalledSW)
-				return nil
-			}
-
-			server, err := client.Decode[Server](resp)
+			software, err := client.Decode[serverSoftware](resp)
 			if err != nil {
 				return fmt.Errorf("decode response: %w", err)
 			}
 
-			if len(server.InstalledSW) == 0 {
+			if jsonOutput {
+				ui.PrintJSON(software.names())
+				return nil
+			}
+
+			packages := software.packages()
+			if len(packages) == 0 {
 				fmt.Println()
 				ui.PrintInfo("No software installed. Run 'dcs software install' to add some.")
 				fmt.Println()
@@ -211,14 +210,89 @@ func newSoftwareListCmd() *cobra.Command {
 			}
 
 			fmt.Println()
-			for _, sw := range server.InstalledSW {
-				fmt.Printf("  %s %s\n", ui.Success.Render("*"), sw)
+			for _, pkg := range packages {
+				fmt.Printf("  %s %s\n", ui.Success.Render("*"), pkg.label())
 			}
 			fmt.Println()
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
+}
+
+const (
+	softwarePHP      = "php"
+	softwareNode     = "node"
+	softwareMySQL    = "mysql"
+	softwarePostgres = "postgres"
+	softwareRedis    = "redis"
+)
+
+// serverSoftware is the part of a server response that says what is
+// installed. PHP, Node.js, MySQL, PostgreSQL and Redis predate the
+// installedSoftware map and keep columns of their own; every other package is
+// a map entry whose value is true or the installed version.
+type serverSoftware struct {
+	Installed       map[string]any `json:"installedSoftware"`
+	PHPVersions     []string       `json:"phpVersions"`
+	NodeVersion     string         `json:"nodeVersion"`
+	InstallMySQL    bool           `json:"installMySQL"`
+	InstallPostgres bool           `json:"installPostgres"`
+	InstallRedis    bool           `json:"installRedis"`
+}
+
+type installedPackage struct {
+	name    string
+	version string
+}
+
+func (p installedPackage) label() string {
+	return strings.TrimSpace(p.name + " " + p.version)
+}
+
+// packages lists what is installed under the names 'dcs software install'
+// and 'uninstall' take, sorted, one entry per PHP version.
+func (s serverSoftware) packages() []installedPackage {
+	var packages []installedPackage
+	for _, version := range s.PHPVersions {
+		packages = append(packages, installedPackage{name: softwarePHP, version: version})
+	}
+	if s.NodeVersion != "" {
+		packages = append(packages, installedPackage{name: softwareNode, version: s.NodeVersion})
+	}
+	for name, installed := range map[string]bool{softwareMySQL: s.InstallMySQL, softwarePostgres: s.InstallPostgres, softwareRedis: s.InstallRedis} {
+		if installed {
+			packages = append(packages, installedPackage{name: name})
+		}
+	}
+	for name, value := range s.Installed {
+		switch value := value.(type) {
+		case bool:
+			if value {
+				packages = append(packages, installedPackage{name: name})
+			}
+		case string:
+			if value != "" {
+				packages = append(packages, installedPackage{name: name, version: value})
+			}
+		}
+	}
+	slices.SortFunc(packages, func(a, b installedPackage) int {
+		return strings.Compare(a.label(), b.label())
+	})
+	return packages
+}
+
+// names is the JSON shape of 'dcs software list': the package names, each
+// once, so a script can pass one straight to 'dcs software uninstall'.
+func (s serverSoftware) names() []string {
+	names := []string{}
+	for _, pkg := range s.packages() {
+		if !slices.Contains(names, pkg.name) {
+			names = append(names, pkg.name)
+		}
+	}
+	return names
 }

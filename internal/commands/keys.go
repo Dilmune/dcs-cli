@@ -167,6 +167,19 @@ func newKeysAddCmd() *cobra.Command {
 	return cmd
 }
 
+type sshKeyRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+var sshKeyLookup = lookup[sshKeyRef]{
+	kind:     "SSH key",
+	wanted:   "an SSH key name or ID",
+	listHint: "Run 'dcs keys list' to see your keys.",
+	name:     func(k sshKeyRef) string { return k.Name },
+	id:       func(k sshKeyRef) string { return k.ID },
+}
+
 func newKeysRmCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
@@ -180,38 +193,20 @@ func newKeysRmCmd() *cobra.Command {
 				return fmt.Errorf("auth: %w", err)
 			}
 
-			resp, err := apiClient.Get(context.Background(), client.PathSSHKeys, nil)
+			key, err := sshKeyLookup.find(cmd.Context(), args[0], func(ctx context.Context) ([]sshKeyRef, error) {
+				return listAll[sshKeyRef](ctx, client.PathSSHKeys)
+			})
 			if err != nil {
-				return fmt.Errorf("fetch: %w", err)
+				return fmt.Errorf("resolve SSH key: %w", err)
 			}
-
-			keys, err := client.Decode[[]struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			}](resp)
-			if err != nil {
-				return fmt.Errorf("decode response: %w", err)
-			}
-
-			var keyID, keyName string
-			for _, k := range keys {
-				if strings.EqualFold(k.Name, args[0]) || k.ID == args[0] || strings.HasPrefix(k.ID, args[0]) {
-					keyID = k.ID
-					keyName = k.Name
-					break
-				}
-			}
-
-			if keyID == "" {
-				return fmt.Errorf("SSH key '%s' not found. Run 'dcs keys list' to see your keys.", args[0])
-			}
+			keyID, keyName := key.ID, key.Name
 
 			if jsonOutput {
 				return deleteJSON(cmd.Context(), client.PathSSHKey(keyID), keyID, force)
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Remove SSH key %s?", ui.Bold.Render(keyName)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Remove SSH key %s?", ui.Bold.Render(keyName)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}

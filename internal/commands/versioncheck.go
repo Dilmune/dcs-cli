@@ -19,8 +19,11 @@ import (
 const (
 	versionCheckFile   = "version-check.json"
 	versionCheckMaxAge = 24 * time.Hour
-	versionCheckURL    = "https://api.github.com/repos/dilmune/dcs-cli/releases/latest"
 )
+
+// versionCheckURL is a variable only so the command tests can point the
+// background check at a local server; nothing a user runs can change it.
+var versionCheckURL = "https://api.github.com/repos/dilmune/dcs-cli/releases/latest"
 
 type versionCheckResult struct {
 	LatestVersion string    `json:"latest_version"`

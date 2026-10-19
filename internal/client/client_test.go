@@ -90,6 +90,28 @@ func TestClient_Unauthorized(t *testing.T) {
 
 	_, err := c.Get(context.Background(), "/test", nil)
 	assert.ErrorIs(t, err, ErrNotAuthenticated)
+	assert.NotErrorIs(t, err, ErrEnvAPIKeyRejected)
+	assert.Contains(t, err.Error(), "dcs login")
+}
+
+// A key from DCS_API_KEY overrides whatever 'dcs login' stores, so sending
+// a rejected environment key to login leaves a script exactly where it was.
+func TestClient_UnauthorizedEnvironmentKey(t *testing.T) {
+	ts, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	c.SetKeyFromEnvironment(true)
+
+	_, err := c.Get(context.Background(), "/test", nil)
+	require.ErrorIs(t, err, ErrEnvAPIKeyRejected)
+	assert.ErrorIs(t, err, ErrNotAuthenticated, "callers that check for a missing login still match")
+	assert.Equal(t, "The API key in DCS_API_KEY was rejected.\n\n  Check its value, or create a new key in the portal under Settings, API Keys, and set DCS_API_KEY to it.", err.Error())
+	assert.NotContains(t, err.Error(), "dcs login")
+
+	ws := New(ts.URL, "test-api-key")
+	ws.SetKeyFromEnvironment(true)
+	_, err = ws.DialWS()
+	assert.ErrorIs(t, err, ErrEnvAPIKeyRejected, "the websocket handshake gives the same advice")
 }
 
 func TestClient_APIError(t *testing.T) {

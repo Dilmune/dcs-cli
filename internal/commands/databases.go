@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
@@ -178,7 +177,7 @@ func newDBListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -263,7 +262,7 @@ func newDBCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&name, "name", "", "Database name")
 	cmd.Flags().StringVar(&dbType, "type", "", "Database type (mysql8, mariadb, postgres16, postgres15, mongodb7, redis7; aliases: mysql, postgres)")
 	return cmd
@@ -298,7 +297,7 @@ func newDBDeleteCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete database %s? This cannot be undone.", ui.Bold.Render(db.Name)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete database %s? This cannot be undone.", ui.Bold.Render(db.Name)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -322,7 +321,7 @@ func newDBDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
@@ -379,7 +378,7 @@ func newDBUsersCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -424,7 +423,7 @@ func newDBSchemaCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -479,7 +478,7 @@ func newDBBackupCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -530,12 +529,8 @@ func newDBBackupsCmd() *cobra.Command {
 			headers := []string{"ID", "Status", "Size", "Completed", "Created"}
 			rows := make([][]string, len(backups))
 			for i, b := range backups {
-				id := b.ID
-				if len(id) > 8 {
-					id = id[:8]
-				}
 				rows[i] = []string{
-					id,
+					shortID(b.ID),
 					b.Status,
 					formatBytes(b.SizeBytes),
 					b.CompletedAt,
@@ -548,7 +543,7 @@ func newDBBackupsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -576,10 +571,13 @@ func newDBRestoreCmd() *cobra.Command {
 				return fmt.Errorf("resolveDB: %w", err)
 			}
 
-			backupID := args[1]
+			backup, err := resolveBackup(serverID, db, args[1])
+			if err != nil {
+				return fmt.Errorf("resolve backup: %w", err)
+			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Restore %s from backup %s? Current data will be overwritten.", ui.Bold.Render(db.Name), backupID[:8]))
+				confirmed, err := confirmForceable(fmt.Sprintf("Restore %s from backup %s? Current data will be overwritten.", ui.Bold.Render(db.Name), shortID(backup.ID)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -589,7 +587,7 @@ func newDBRestoreCmd() *cobra.Command {
 			}
 
 			err = ui.RunWithSpinner("Restoring "+db.Name+"...", func() error {
-				_, err := apiClient.Post(context.Background(), client.PathDatabaseBackupRestore(serverID, db.ID, backupID), nil)
+				_, err := apiClient.Post(context.Background(), client.PathDatabaseBackupRestore(serverID, db.ID, backup.ID), nil)
 				if err != nil {
 					return fmt.Errorf("restore: %w", err)
 				}
@@ -603,7 +601,7 @@ func newDBRestoreCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
@@ -688,7 +686,7 @@ func newDBQueryCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&sql, "sql", "", "SQL query to execute")
 	return cmd
 }
@@ -706,25 +704,30 @@ func formatBytes(b int64) string {
 	}
 }
 
+// resolveBackup accepts the short ID 'dcs db backups' prints, and only a
+// backup of this database. The API looks backups up by their full UUID only.
+func resolveBackup(serverID string, db *Database, input string) (*DBBackup, error) {
+	backupLookup := lookup[DBBackup]{
+		kind:     "backup",
+		wanted:   "a backup ID",
+		listHint: fmt.Sprintf("Run 'dcs db backups %s' to see its backups.", db.Name),
+		id:       func(b DBBackup) string { return b.ID },
+	}
+	return backupLookup.find(context.Background(), input, func(ctx context.Context) ([]DBBackup, error) {
+		return listAll[DBBackup](ctx, client.PathDatabaseBackups(serverID, db.ID))
+	})
+}
+
+var databaseLookup = lookup[Database]{
+	kind:     "database",
+	wanted:   "a database name or ID",
+	listHint: "Run 'dcs db list' to see your databases.",
+	name:     func(d Database) string { return d.Name },
+	id:       func(d Database) string { return d.ID },
+}
+
 func resolveDB(serverID, nameOrID string) (*Database, error) {
-	resp, err := apiClient.Get(context.Background(), client.PathDatabases(serverID), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	dbs, err := client.Decode[[]Database](resp)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, d := range dbs {
-		if strings.EqualFold(d.Name, nameOrID) || d.ID == nameOrID || strings.HasPrefix(d.ID, nameOrID) {
-			return &d, nil
-		}
-	}
-
-	return nil, &client.CLIError{
-		Message:    fmt.Sprintf("Database '%s' not found.", nameOrID),
-		Suggestion: "Run 'dcs db list' to see your databases.",
-	}
+	return databaseLookup.find(context.Background(), nameOrID, func(ctx context.Context) ([]Database, error) {
+		return listAll[Database](ctx, client.PathDatabases(serverID))
+	})
 }

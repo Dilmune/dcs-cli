@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,6 +54,19 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	cfg := Load()
 	assert.Equal(t, "https://env.api.com", cfg.APIURL)
 	assert.Equal(t, "dcs_from_env", cfg.APIKey)
+	assert.True(t, cfg.APIKeyFromEnv)
+
+	require.NoError(t, cfg.Save())
+	saved, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(saved, &fields))
+	for field := range fields {
+		assert.NotContains(t, strings.ToLower(field), "env", "where the key came from is not configuration")
+	}
+
+	t.Setenv("DCS_API_KEY", "")
+	assert.False(t, Load().APIKeyFromEnv, "a key read from the file is not an environment key")
 }
 
 func TestLoad_InvalidJSON(t *testing.T) {

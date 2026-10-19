@@ -8,7 +8,39 @@ import (
 )
 
 // ErrNonInteractive is returned when a prompt is attempted in a non-interactive environment.
-var ErrNonInteractive = errors.New("this operation requires interactive input\n\n  Provide all required flags, or use --force to skip confirmations")
+var ErrNonInteractive = errors.New("this operation requires interactive input")
+
+// nonInteractiveAdvice is all a prompt can say on its own. It does not know
+// which flag would have answered it, and --force only answers a confirmation,
+// so the caller that knows names it through ExplainNonInteractive.
+const nonInteractiveAdvice = "Run it in a terminal, or check --help for flags that supply the answer."
+
+// NonInteractiveError is ErrNonInteractive plus what would have answered the
+// prompt, so a script is sent to a flag rather than to a terminal.
+type NonInteractiveError struct {
+	Hint string
+}
+
+func (e *NonInteractiveError) Error() string {
+	return ErrNonInteractive.Error() + "\n\n  " + e.Hint
+}
+
+func (e *NonInteractiveError) Unwrap() error {
+	return ErrNonInteractive
+}
+
+// ExplainNonInteractive replaces the advice on a prompt that could not run
+// with hint, and returns any other error, or nil, unchanged.
+func ExplainNonInteractive(err error, hint string) error {
+	if errors.Is(err, ErrNonInteractive) {
+		return &NonInteractiveError{Hint: hint}
+	}
+	return err
+}
+
+func nonInteractive() error {
+	return &NonInteractiveError{Hint: nonInteractiveAdvice}
+}
 
 // promptTheme returns huh's own styles with the accent token on the five
 // elements a form highlights. The focused button keeps huh's foreground so no
@@ -47,7 +79,7 @@ func runPrompt(field huh.Field) error {
 // Confirm shows a yes/no confirmation prompt.
 func Confirm(message string) (bool, error) {
 	if !IsInteractive() {
-		return false, ErrNonInteractive
+		return false, nonInteractive()
 	}
 	var confirmed bool
 	err := runPrompt(huh.NewConfirm().
@@ -61,7 +93,7 @@ func Confirm(message string) (bool, error) {
 // SelectOption shows a selection prompt and returns the selected value.
 func SelectOption(title string, options []huh.Option[string]) (string, error) {
 	if !IsInteractive() {
-		return "", ErrNonInteractive
+		return "", nonInteractive()
 	}
 	var selected string
 	err := runPrompt(huh.NewSelect[string]().
@@ -74,7 +106,7 @@ func SelectOption(title string, options []huh.Option[string]) (string, error) {
 // Input shows a text input prompt and returns the value.
 func Input(title, placeholder string) (string, error) {
 	if !IsInteractive() {
-		return "", ErrNonInteractive
+		return "", nonInteractive()
 	}
 	var value string
 	err := runPrompt(huh.NewInput().
@@ -87,7 +119,7 @@ func Input(title, placeholder string) (string, error) {
 // InputPassword shows a masked text input.
 func InputPassword(title, placeholder string) (string, error) {
 	if !IsInteractive() {
-		return "", ErrNonInteractive
+		return "", nonInteractive()
 	}
 	var value string
 	err := runPrompt(huh.NewInput().

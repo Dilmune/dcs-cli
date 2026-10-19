@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -114,4 +116,31 @@ func TestTerminalProfile(t *testing.T) {
 			assert.Equal(t, tc.want, TerminalProfile(io.Discard, tc.plainOutput))
 		})
 	}
+}
+
+func TestPromptsOutsideATerminalDoNotSuggestForce(t *testing.T) {
+	prompts := map[string]func() error{
+		"confirm":  func() error { _, err := Confirm("Continue?"); return err },
+		"select":   func() error { _, err := SelectOption("Pick", nil); return err },
+		"input":    func() error { _, err := Input("Name", ""); return err },
+		"password": func() error { _, err := InputPassword("Key", ""); return err },
+	}
+	for name, prompt := range prompts {
+		t.Run(name, func(t *testing.T) {
+			err := prompt()
+			assert.ErrorIs(t, err, ErrNonInteractive)
+			assert.Equal(t, "this operation requires interactive input\n\n  Run it in a terminal, or check --help for flags that supply the answer.", err.Error())
+		})
+	}
+}
+
+func TestExplainNonInteractive(t *testing.T) {
+	other := errors.New("network down")
+	assert.NoError(t, ExplainNonInteractive(nil, "Pass --server."))
+	assert.Same(t, other, ExplainNonInteractive(other, "Pass --server."))
+
+	_, promptErr := Confirm("Continue?")
+	explained := ExplainNonInteractive(fmt.Errorf("confirm: %w", promptErr), "Pass --server.")
+	assert.ErrorIs(t, explained, ErrNonInteractive)
+	assert.Equal(t, "this operation requires interactive input\n\n  Pass --server.", explained.Error())
 }

@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,4 +165,46 @@ func TestLogoutNotAuthenticated(t *testing.T) {
 	})
 
 	assert.Contains(t, out, "Not currently authenticated")
+}
+
+// End to end through the root: the key comes from the environment, the API
+// rejects it, and the error names the variable instead of 'dcs login'.
+func TestRejectedEnvironmentKeyNamesTheVariable(t *testing.T) {
+	t.Cleanup(setupTest(t, newMockAPI()))
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer dcs_env_fixture", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(api.Close)
+	dir := t.TempDir()
+	t.Setenv("DCS_CONFIG_DIR", dir)
+	t.Setenv("DCS_API_URL", api.URL)
+	// A fresh cached answer keeps the root's background version check off
+	// the network for this test.
+	cached, err := json.Marshal(versionCheckResult{LatestVersion: "v0.0.0", CheckedAt: time.Now()})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, versionCheckFile), cached, 0o600))
+
+	for name, key := range map[string]string{"environment key": "dcs_env_fixture", "stored key": ""} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("DCS_API_KEY", key)
+			if key == "" {
+				require.NoError(t, (&config.Config{APIURL: api.URL, APIKey: "dcs_env_fixture"}).Save())
+			}
+			root := NewRootCmd()
+			root.SetArgs([]string{"servers", "list"})
+			var err error
+			captureStderr(t, func() {
+				captureStdout(t, func() { err = root.Execute() })
+			})
+			require.ErrorIs(t, err, client.ErrNotAuthenticated)
+			if key != "" {
+				assert.ErrorIs(t, err, client.ErrEnvAPIKeyRejected)
+				assert.NotContains(t, err.Error(), "dcs login")
+			} else {
+				assert.NotErrorIs(t, err, client.ErrEnvAPIKeyRejected)
+				assert.Contains(t, err.Error(), "dcs login")
+			}
+		})
+	}
 }

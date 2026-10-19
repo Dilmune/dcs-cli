@@ -37,7 +37,7 @@ func newUICmd() *cobra.Command {
 			settings := config.Load()
 			var api *client.Client
 			if settings.IsAuthenticated() {
-				api = client.New(settings.APIURL, settings.APIKey)
+				api = newAPIClient(settings)
 			}
 			dir := config.Dir()
 			seen, preferenceErr := config.UIWelcomeSeen(dir)

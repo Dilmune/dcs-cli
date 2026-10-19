@@ -45,7 +45,7 @@ func newLogsCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&siteFlag, "site", "", "Site ID to follow deployments for")
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow logs in real-time")
 	return cmd

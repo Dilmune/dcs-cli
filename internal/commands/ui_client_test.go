@@ -106,6 +106,8 @@ func TestUISourceAuthenticationAndSafeErrors(t *testing.T) {
 	_, err := source.Load(context.Background(), workspace.Request{Kind: workspace.Servers})
 	assert.ErrorIs(t, err, client.ErrNotAuthenticated)
 	assert.Contains(t, err.Error(), "dcs login")
+	envRejected := safeUIError(fmt.Errorf("read: %w", client.ErrEnvAPIKeyRejected))
+	assert.Equal(t, "The API key in DCS_API_KEY was rejected. Check or replace it, then reopen dcs ui.", envRejected.Error())
 	for _, cause := range []error{client.ErrForbidden, client.ErrRateLimited, context.DeadlineExceeded, context.Canceled, errors.New("secret-url?key=DO-NOT-DISPLAY")} {
 		err := safeUIError(fmt.Errorf("read: %w", cause))
 		assert.ErrorIs(t, err, cause)

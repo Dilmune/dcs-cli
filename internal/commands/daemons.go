@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -111,7 +110,7 @@ func newDaemonListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -189,7 +188,7 @@ func newDaemonCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&name, "name", "", "Daemon name")
 	cmd.Flags().StringVar(&command, "command", "", "Command to run")
 	cmd.Flags().StringVar(&directory, "directory", "", "Working directory")
@@ -225,7 +224,7 @@ func newDaemonDeleteCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete daemon %s?", ui.Bold.Render(daemon.Name)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete daemon %s?", ui.Bold.Render(daemon.Name)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -249,7 +248,7 @@ func newDaemonDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
@@ -291,7 +290,7 @@ func newDaemonStartCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -332,7 +331,7 @@ func newDaemonStopCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -373,7 +372,7 @@ func newDaemonRestartCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -418,35 +417,20 @@ func newDaemonLogsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
+var daemonLookup = lookup[Daemon]{
+	kind:     "daemon",
+	wanted:   "a daemon name or ID",
+	listHint: "Run 'dcs daemon list' to see your daemons.",
+	name:     func(d Daemon) string { return d.Name },
+	id:       func(d Daemon) string { return d.ID },
+}
+
 func resolveDaemon(serverID, nameOrID string) (*Daemon, error) {
-	resp, err := apiClient.Get(context.Background(), client.PathDaemons(serverID), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	daemons, err := client.Decode[[]Daemon](resp)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, d := range daemons {
-		if strings.EqualFold(d.Name, nameOrID) {
-			return &d, nil
-		}
-	}
-
-	for _, d := range daemons {
-		if d.ID == nameOrID || strings.HasPrefix(d.ID, nameOrID) {
-			return &d, nil
-		}
-	}
-
-	return nil, &client.CLIError{
-		Message:    fmt.Sprintf("Daemon '%s' not found.", nameOrID),
-		Suggestion: "Run 'dcs daemon list' to see your daemons.",
-	}
+	return daemonLookup.find(context.Background(), nameOrID, func(ctx context.Context) ([]Daemon, error) {
+		return listAll[Daemon](ctx, client.PathDaemons(serverID))
+	})
 }

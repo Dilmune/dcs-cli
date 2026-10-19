@@ -43,6 +43,13 @@ func (s *Server) UnmarshalJSON(data []byte) error {
 	if wire.CreatedAt != nil {
 		decoded.CreatedAt = *wire.CreatedAt
 	}
+	var software serverSoftware
+	if err := json.Unmarshal(data, &software); err != nil {
+		return fmt.Errorf("decode server software: %w", err)
+	}
+	if names := software.names(); len(names) > 0 {
+		decoded.InstalledSW = names
+	}
 	*s = Server(decoded)
 	return nil
 }
@@ -233,7 +240,7 @@ func createServerInteractive() (*Server, error) {
 
 	name, err := ui.Input("Server name", "my-server")
 	if err != nil {
-		return nil, err
+		return nil, ui.ExplainNonInteractive(err, "Pass --name, --provider, --region and --sku to create a server without prompts.")
 	}
 
 	regResp, err := apiClient.Get(ctx, client.PathProvisionerRegions, nil)
@@ -435,7 +442,7 @@ func newServersDeleteCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete server %s? This cannot be undone.", ui.Bold.Render(server.Name)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete server %s? This cannot be undone.", ui.Bold.Render(server.Name)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -482,7 +489,7 @@ func newServersRebootCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Reboot server %s?", ui.Bold.Render(server.Name)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Reboot server %s?", ui.Bold.Render(server.Name)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -638,31 +645,27 @@ func newServersEventsCmd() *cobra.Command {
 	}
 }
 
-// resolveServer finds a server by name or ID.
+const serverFlagName = "server"
+
+var serverLookup = lookup[Server]{
+	kind:     "server",
+	wanted:   "a server name or ID",
+	listHint: "Run 'dcs servers list' to see your servers.",
+	name:     func(s Server) string { return s.Name },
+	id:       func(s Server) string { return s.ID },
+}
+
 func resolveServer(nameOrID string) (*Server, error) {
-	resp, err := apiClient.Get(context.Background(), client.PathServers, nil)
-	if err != nil {
-		return nil, err
-	}
+	return serverLookup.find(context.Background(), nameOrID, func(ctx context.Context) ([]Server, error) {
+		return listAll[Server](ctx, client.PathServers)
+	})
+}
 
-	servers, err := client.Decode[[]Server](resp)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, s := range servers {
-		if strings.EqualFold(s.Name, nameOrID) {
-			return &s, nil
-		}
-	}
-
-	for _, s := range servers {
-		if s.ID == nameOrID || strings.HasPrefix(s.ID, nameOrID) {
-			return &s, nil
-		}
-	}
-
-	return nil, client.ErrServerNotFound
+// addServerFlag registers --server so that an explicitly empty value is an
+// error. getServerID treats "not given" as "use the linked or default server",
+// and an empty value from an unset variable must not be read that way.
+func addServerFlag(cmd *cobra.Command, value *string) {
+	cmd.Flags().Var(&requiredValue{target: value, wanted: "server name or ID"}, serverFlagName, "Server name or ID")
 }
 
 // sshIntoServer resolves a server and starts an SSH session.
@@ -749,10 +752,12 @@ func getServerID(serverFlag string) (string, error) {
 	// Interactive selection
 	server, err := selectServer()
 	if err != nil {
-		return "", err
+		return "", ui.ExplainNonInteractive(err, serverFlagHint)
 	}
 	return server.ID, nil
 }
+
+const serverFlagHint = "Pass --server with a server name or ID, or set one with 'dcs config set default_server_id <id>'."
 
 func loadProjectConfigQuiet(dir string) (*struct {
 	ServerID string `json:"server_id"`

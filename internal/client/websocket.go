@@ -61,7 +61,7 @@ func (c *Client) DialWS() (*WSConn, error) {
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
-			return nil, ErrNotAuthenticated
+			return nil, c.keyRejected()
 		}
 		return nil, fmt.Errorf("websocket connect: %w", err)
 	}

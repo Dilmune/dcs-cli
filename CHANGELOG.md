@@ -1,5 +1,73 @@
 # DCS CLI changes
 
+## 3.10.0 (2026-10-19)
+
+### Changes that can affect scripts
+
+- Lookups are stricter. A server, site, database, cron job, daemon, SSH key,
+  API key or legacy storage file is found by exact name (case ignored), then
+  exact ID, then an ID prefix of at least 8 characters, the short ID the tables
+  print. A blank argument is refused before any request, two resources with the
+  same name or a prefix that matches several are reported as ambiguous with
+  their IDs, and a prefix shorter than 8 characters no longer resolves. Before,
+  the first match won, so `dcs servers delete "$SERVER" --force` with the
+  variable unset deleted the first server on the account. The lookup now reads
+  every page of the list, so resources past the first 25 are found.
+- An explicitly empty `--server ""` is refused instead of acting on the linked
+  or default server.
+- A word a command group does not know exits 1. `dcs servers show x` used to
+  print help and exit 0.
+- `dcs sites rollback`, `dcs sites logs` and `dcs db restore` take the short
+  deployment or backup ID the tables print. `db restore` accepts only a backup
+  of the database being restored.
+
+### Added
+
+- `dcs storage download -f, --force` replaces an existing file of the same name.
+- `dcs sites rollback -f, --force` skips the confirmation, so a script can run it.
+
+### Security
+
+- `dcs storage download` without `--output` saves into the current directory
+  under the last part of the remote name. A stored name such as
+  `../../.ssh/authorized_keys` used to be written to that path. Names with no
+  usable part, control characters or bidirectional overrides are refused with a
+  pointer to `--output`.
+- An existing file, folder or link under that name is never replaced unless you
+  pass `--force`. The final step is a hard link, which fails if the name exists
+  and never follows a symlink. `--output` still replaces the path you give.
+- The build uses Go 1.26.9, which fixes nine standard library vulnerabilities
+  reached through net/http, net/textproto and crypto/tls.
+
+### Fixes
+
+- `dcs software list` and `dcs servers info` show installed software. The list
+  was empty, and `--json` printed `null`, because the CLI read the wrong field.
+- `dcs cron list` shows the user and created columns, and `dcs cron history`
+  shows real exit codes, or "not recorded".
+- A key from `DCS_API_KEY` that the API rejects is reported as such, instead of
+  telling you to run `dcs login`.
+- Commands with a progress spinner wait for the operation to finish before
+  reporting, and return its own error.
+- Prompts that cannot run without a terminal name the flag that answers them
+  (`--force`, `--server`, `--enable` or `--disable`, `DCS_API_KEY`).
+- `sites rollback`, `db restore` and `sites deployments` no longer panic on an
+  ID shorter than 8 characters.
+
+### Documentation
+
+- After `brew uninstall dcs`, the README tells Homebrew users to reinstall with
+  `brew install dilmune/tap/dcs`, because uninstalling removes the short
+  formula name's trust entry.
+
+### Internal
+
+- Command tests no longer read the developer's configuration or reach the
+  network.
+- `make release-cli` runs the release sequence from the repository, the release
+  runbook keeps the Homebrew Core formula ready, and CLI-only customer notes are
+  named `cli-vX.Y.Z.md`.
+
 ## 3.9.0 (2026-09-24)
 
 ### Fixes

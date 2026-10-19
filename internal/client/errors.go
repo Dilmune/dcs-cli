@@ -29,17 +29,17 @@ var (
 		Message:    "Not authenticated.",
 		Suggestion: "Run 'dcs login' to get started.",
 	}
+	// ErrEnvAPIKeyRejected is a 401 for a key from DCS_API_KEY. It is still
+	// ErrNotAuthenticated to errors.Is, but 'dcs login' cannot help: the
+	// variable keeps overriding whatever login stores.
+	ErrEnvAPIKeyRejected = &CLIError{
+		Message:    "The API key in DCS_API_KEY was rejected.",
+		Suggestion: "Check its value, or create a new key in the portal under Settings, API Keys, and set DCS_API_KEY to it.",
+		Err:        ErrNotAuthenticated,
+	}
 	ErrNoProjectConfig = &CLIError{
 		Message:    "No .dcs.json found in the current directory.",
 		Suggestion: "Run 'dcs init' to link this directory to a project.",
-	}
-	ErrServerNotFound = &CLIError{
-		Message:    "Server not found.",
-		Suggestion: "Run 'dcs servers list' to see your servers.",
-	}
-	ErrSiteNotFound = &CLIError{
-		Message:    "Site not found.",
-		Suggestion: "Run 'dcs sites list' to see your sites.",
 	}
 	ErrForbidden = &CLIError{
 		Message:    "Permission denied.",

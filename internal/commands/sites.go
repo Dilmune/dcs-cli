@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
@@ -168,7 +167,7 @@ func newSitesListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -245,7 +244,7 @@ func newSitesCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&domain, "domain", "", "Domain name")
 	cmd.Flags().StringVar(&projectType, "type", "", "Project type")
 	cmd.Flags().StringVar(&gitRepo, "repo", "", "Git repository URL")
@@ -351,7 +350,7 @@ func newSitesInfoCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -386,7 +385,7 @@ func newSitesDeleteCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete site %s?", ui.Bold.Render(site.Domain)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete site %s?", ui.Bold.Render(site.Domain)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -410,7 +409,7 @@ func newSitesDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
@@ -500,13 +499,26 @@ func newSitesDeployCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&branch, "branch", "", "Git branch to deploy")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Wait for deployment to complete")
 	return cmd
 }
 
 const deploymentStatusColumn = 1
+
+// shortIDLength is how much of an ID the tables print: enough to tell rows
+// apart at a glance, with the full ID in the --json output.
+const shortIDLength = 8
+
+// shortID never slices past the end, so an ID the user typed can be shown
+// whatever its length.
+func shortID(id string) string {
+	if len(id) <= shortIDLength {
+		return id
+	}
+	return id[:shortIDLength]
+}
 
 // Every deployment column has a known shape; none shrinks.
 var deploymentListFixedColumns = []bool{true, true, true, true, true}
@@ -563,7 +575,7 @@ func newSitesDeploymentsCmd() *cobra.Command {
 					sha = sha[:7]
 				}
 				rows[i] = []string{
-					d.ID[:8],
+					shortID(d.ID),
 					d.Status,
 					sha,
 					d.Trigger,
@@ -576,7 +588,7 @@ func newSitesDeploymentsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -625,16 +637,19 @@ func newSitesSSLCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
 func newSitesRollbackCmd() *cobra.Command {
-	var serverFlag string
+	var (
+		serverFlag string
+		force      bool
+	)
 	cmd := &cobra.Command{
 		Use:               "rollback <domain> <deployment-id>",
 		Short:             "Rollback to a previous deployment",
-		Example:           "  dcs sites rollback example.com abc12345",
+		Example:           "  dcs sites rollback example.com abc12345\n  dcs sites rollback example.com abc12345 --force",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeSiteNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -652,19 +667,24 @@ func newSitesRollbackCmd() *cobra.Command {
 				return fmt.Errorf("resolveSite: %w", err)
 			}
 
-			deploymentID := args[1]
-
-			confirmed, err := ui.Confirm(fmt.Sprintf("Rollback %s to deployment %s?", ui.Bold.Render(site.Domain), deploymentID[:8]))
+			target, err := resolveDeployment(serverID, site, args[1])
 			if err != nil {
-				return fmt.Errorf("confirm: %w", err)
+				return fmt.Errorf("resolve deployment: %w", err)
 			}
-			if !confirmed {
-				return nil
+
+			if !force {
+				confirmed, err := confirmForceable(fmt.Sprintf("Rollback %s to deployment %s?", ui.Bold.Render(site.Domain), shortID(target.ID)))
+				if err != nil {
+					return fmt.Errorf("confirm: %w", err)
+				}
+				if !confirmed {
+					return nil
+				}
 			}
 
 			var deployment Deployment
 			err = ui.RunWithSpinner("Rolling back...", func() error {
-				resp, err := apiClient.Post(context.Background(), client.PathDeploymentRollback(serverID, site.ID, deploymentID), nil)
+				resp, err := apiClient.Post(context.Background(), client.PathDeploymentRollback(serverID, site.ID, target.ID), nil)
 				if err != nil {
 					return fmt.Errorf("create: %w", err)
 				}
@@ -691,7 +711,8 @@ func newSitesRollbackCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
 
@@ -718,9 +739,12 @@ func newSitesLogsCmd() *cobra.Command {
 				return fmt.Errorf("resolveSite: %w", err)
 			}
 
-			deploymentID := args[1]
+			deployment, err := resolveDeployment(serverID, site, args[1])
+			if err != nil {
+				return fmt.Errorf("resolve deployment: %w", err)
+			}
 
-			resp, err := apiClient.Get(context.Background(), client.PathDeploymentLogs(serverID, site.ID, deploymentID), nil)
+			resp, err := apiClient.Get(context.Background(), client.PathDeploymentLogs(serverID, site.ID, deployment.ID), nil)
 			if err != nil {
 				return fmt.Errorf("fetch: %w", err)
 			}
@@ -753,27 +777,34 @@ func newSitesLogsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
-// resolveSite finds a site by domain name or ID.
+// resolveDeployment accepts the short ID 'dcs sites deployments' prints. The
+// API looks deployments up by their full UUID only.
+func resolveDeployment(serverID string, site *Site, input string) (*Deployment, error) {
+	deploymentLookup := lookup[Deployment]{
+		kind:     "deployment",
+		wanted:   "a deployment ID",
+		listHint: fmt.Sprintf("Run 'dcs sites deployments %s' to see its deployments.", site.Domain),
+		id:       func(d Deployment) string { return d.ID },
+	}
+	return deploymentLookup.find(context.Background(), input, func(ctx context.Context) ([]Deployment, error) {
+		return listAll[Deployment](ctx, client.PathSiteDeployments(serverID, site.ID))
+	})
+}
+
+var siteLookup = lookup[Site]{
+	kind:     "site",
+	wanted:   "a site domain or ID",
+	listHint: "Run 'dcs sites list' to see your sites.",
+	name:     func(s Site) string { return s.Domain },
+	id:       func(s Site) string { return s.ID },
+}
+
 func resolveSite(serverID, domainOrID string) (*Site, error) {
-	resp, err := apiClient.Get(context.Background(), client.PathSites(serverID), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	sites, err := client.Decode[[]Site](resp)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, s := range sites {
-		if strings.EqualFold(s.Domain, domainOrID) || s.ID == domainOrID || strings.HasPrefix(s.ID, domainOrID) {
-			return &s, nil
-		}
-	}
-
-	return nil, client.ErrSiteNotFound
+	return siteLookup.find(context.Background(), domainOrID, func(ctx context.Context) ([]Site, error) {
+		return listAll[Site](ctx, client.PathSites(serverID))
+	})
 }

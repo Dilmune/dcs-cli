@@ -14,7 +14,7 @@ import (
 )
 
 // Version is set via ldflags at build time.
-var Version = "3.9.0"
+var Version = "3.10.0"
 
 const (
 	bearerPrefix    = "Bearer "
@@ -28,10 +28,11 @@ const (
 
 // Client is the DCS API HTTP client.
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
-	debug   bool
+	baseURL    string
+	apiKey     string
+	http       *http.Client
+	debug      bool
+	keyFromEnv bool
 }
 
 // New creates a new API client.
@@ -70,6 +71,19 @@ func isHTTPSDowngrade(previous, next *url.URL) bool {
 // SetDebug enables request/response logging to stderr.
 func (c *Client) SetDebug(debug bool) {
 	c.debug = debug
+}
+
+// SetKeyFromEnvironment marks the key as taken from DCS_API_KEY, which
+// changes the advice a rejected key gets.
+func (c *Client) SetKeyFromEnvironment(fromEnv bool) {
+	c.keyFromEnv = fromEnv
+}
+
+func (c *Client) keyRejected() error {
+	if c.keyFromEnv {
+		return ErrEnvAPIKeyRejected
+	}
+	return ErrNotAuthenticated
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, query url.Values) (*APIResponse, error) {
@@ -161,7 +175,7 @@ func (c *Client) execute(ctx context.Context, method, rawURL string, bodyData []
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
-		return nil, false, ErrNotAuthenticated
+		return nil, false, c.keyRejected()
 
 	case resp.StatusCode == http.StatusForbidden:
 		return nil, false, ErrForbidden

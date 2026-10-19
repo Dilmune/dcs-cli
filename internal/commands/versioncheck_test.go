@@ -122,30 +122,32 @@ func TestVersionCheckResult_Expired(t *testing.T) {
 }
 
 func TestGetLatestVersion_FromServer(t *testing.T) {
+	var requests int
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
 	}))
 	defer ts.Close()
+	original := versionCheckURL
+	versionCheckURL = ts.URL
+	t.Cleanup(func() { versionCheckURL = original })
 
 	dir := t.TempDir()
 	t.Setenv("DCS_CONFIG_DIR", dir)
 
-	// Override the URL for testing - we test the cache/parse logic directly
-	cachePath := filepath.Join(dir, versionCheckFile)
-
-	// Simulate a fresh fetch result being cached
-	result := versionCheckResult{
-		LatestVersion: "v2.0.0",
-		CheckedAt:     time.Now(),
-	}
-	data, _ := json.Marshal(result)
-	require.NoError(t, os.WriteFile(cachePath, data, 0600))
-
-	// Read back from cache
-	raw, err := os.ReadFile(cachePath)
+	latest, err := getLatestVersion()
 	require.NoError(t, err)
+	assert.Equal(t, "v2.0.0", latest)
+	assert.Equal(t, 1, requests)
 
+	raw, err := os.ReadFile(filepath.Join(dir, versionCheckFile))
+	require.NoError(t, err)
 	var cached versionCheckResult
 	require.NoError(t, json.Unmarshal(raw, &cached))
 	assert.Equal(t, "v2.0.0", cached.LatestVersion)
+
+	latest, err = getLatestVersion()
+	require.NoError(t, err)
+	assert.Equal(t, "v2.0.0", latest)
+	assert.Equal(t, 1, requests, "a fresh cache answers without a request")
 }

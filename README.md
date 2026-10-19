@@ -55,6 +55,10 @@ brew update
 brew upgrade dilmune/tap/dcs
 ```
 
+After `brew uninstall dcs`, reinstall with the full name,
+`brew install dilmune/tap/dcs`. Homebrew removes the formula's trust entry
+when it uninstalls, so the short `brew install dcs` is refused.
+
 ## Get started
 
 Create a DCS API key in the [Dilmune Cloud portal](https://cloud.dilmune.com/settings/api-keys),
