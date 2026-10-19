@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -234,7 +233,7 @@ func prepareStorageDownload(ctx context.Context, api *client.Client, bucketName,
 		if err != nil {
 			return nil, fmt.Errorf("resolve bucket: %w", err)
 		}
-		endpoint, name = client.PathBucketObjectURL(bucket.ID), filepath.Base(nameOrKey)
+		endpoint, name = client.PathBucketObjectURL(bucket.ID), nameOrKey
 		query = url.Values{storageKeyQuery: {nameOrKey}}
 	}
 	resp, err := api.Get(ctx, endpoint, query)

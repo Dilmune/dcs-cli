@@ -34,7 +34,7 @@ func newLoginCmd() *cobra.Command {
 				huh.NewOption("Paste an existing API key", "paste"),
 			})
 			if err != nil {
-				return fmt.Errorf("select an authentication method: %w", err)
+				return fmt.Errorf("select an authentication method: %w", ui.ExplainNonInteractive(err, apiKeyEnvHint))
 			}
 
 			if method == "browser" {
@@ -86,6 +86,10 @@ func newLoginCmd() *cobra.Command {
 		},
 	}
 }
+
+// apiKeyEnvHint is how a script authenticates: login has no flag that takes
+// the key, and the environment variable is read on every command.
+const apiKeyEnvHint = "Set the DCS_API_KEY environment variable to use an API key without a terminal."
 
 func newLogoutCmd() *cobra.Command {
 	return &cobra.Command{

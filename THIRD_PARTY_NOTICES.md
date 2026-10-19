@@ -3,7 +3,7 @@
 This file preserves upstream license and notice texts collected for the CLI and
 its tests on macOS, Linux and Windows (AMD64 and ARM64). Dependency versions are
 pinned in `go.mod` and `go.sum`; this inventory was prepared with go-licenses
-v2.0.1 and Go 1.26.8. Not every dependency is linked into every platform's binary.
+v2.0.1 and Go 1.26.9. Not every dependency is linked into every platform's binary.
 
 The upstream texts below govern their respective components. They do not grant a
 license to Dilmune's own code. The CLI's first-party license belongs in `LICENSE`.
@@ -1678,7 +1678,7 @@ limitations under the License.
 
 ## Go runtime and vendored runtime dependencies
 
-### Go 1.26.8: LICENSE
+### Go 1.26.9: LICENSE
 
 ````text
 Copyright 2009 The Go Authors.
@@ -1710,7 +1710,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ````
 
-### Go 1.26.8: PATENTS
+### Go 1.26.9: PATENTS
 
 ````text
 Additional IP Rights Grant (Patents)
@@ -1737,7 +1737,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/crypto/LICENSE
+### Go 1.26.9: src/vendor/golang.org/x/crypto/LICENSE
 
 ````text
 Copyright 2009 The Go Authors.
@@ -1769,7 +1769,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/crypto/PATENTS
+### Go 1.26.9: src/vendor/golang.org/x/crypto/PATENTS
 
 ````text
 Additional IP Rights Grant (Patents)
@@ -1796,7 +1796,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/net/LICENSE
+### Go 1.26.9: src/vendor/golang.org/x/net/LICENSE
 
 ````text
 Copyright 2009 The Go Authors.
@@ -1828,7 +1828,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/net/PATENTS
+### Go 1.26.9: src/vendor/golang.org/x/net/PATENTS
 
 ````text
 Additional IP Rights Grant (Patents)
@@ -1855,7 +1855,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/sys/LICENSE
+### Go 1.26.9: src/vendor/golang.org/x/sys/LICENSE
 
 ````text
 Copyright 2009 The Go Authors.
@@ -1887,7 +1887,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/sys/PATENTS
+### Go 1.26.9: src/vendor/golang.org/x/sys/PATENTS
 
 ````text
 Additional IP Rights Grant (Patents)
@@ -1914,7 +1914,7 @@ rights granted to you under this License for this implementation of Go
 shall terminate as of the date such litigation is filed.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/text/LICENSE
+### Go 1.26.9: src/vendor/golang.org/x/text/LICENSE
 
 ````text
 Copyright 2009 The Go Authors.
@@ -1946,7 +1946,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ````
 
-### Go 1.26.8: src/vendor/golang.org/x/text/PATENTS
+### Go 1.26.9: src/vendor/golang.org/x/text/PATENTS
 
 ````text
 Additional IP Rights Grant (Patents)

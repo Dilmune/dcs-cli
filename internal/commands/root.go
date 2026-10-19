@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -9,6 +10,8 @@ import (
 	"github.com/dilmune/dcs-cli/internal/config"
 	"github.com/dilmune/dcs-cli/internal/ui"
 )
+
+const helpCommandName = "help"
 
 const (
 	groupServers    = "servers"
@@ -65,7 +68,7 @@ func NewRootCmd() *cobra.Command {
 
 			cfg = config.Load()
 			if cfg.IsAuthenticated() {
-				apiClient = client.New(cfg.APIURL, cfg.APIKey)
+				apiClient = newAPIClient(cfg)
 				if debugMode {
 					apiClient.SetDebug(true)
 				}
@@ -104,8 +107,44 @@ func NewRootCmd() *cobra.Command {
 	addToGroup(root, groupStorage, newStorageCmd())
 	addToGroup(root, groupAccess, newLoginCmd(), newLogoutCmd(), newWhoamiCmd(), newAPIKeysCmd(), newConfigCmd())
 	addToGroup(root, groupOperations, newCronCmd(), newDaemonsCmd(), newStatusCmd(), newOpenCmd(), newUICmd(), newVersionCmd(), newCompletionCmd(), newDocsCmd())
+	rejectUnknownSubcommands(root)
 
 	return root
+}
+
+// rejectUnknownSubcommands makes every command group fail on a word it does
+// not know. Cobra only checks for unknown commands at the root, so
+// 'dcs servers show x' printed help and exited 0, and a script read a wrong
+// guess as success. The check runs as argument validation, before any hook
+// loads the configuration or reaches the network.
+func rejectUnknownSubcommands(cmd *cobra.Command) {
+	for _, child := range cmd.Commands() {
+		if isCommandGroup(child) {
+			child.Args = noUnknownSubcommand
+			child.RunE = showGroupHelp
+		}
+		rejectUnknownSubcommands(child)
+	}
+}
+
+func isCommandGroup(cmd *cobra.Command) bool {
+	return cmd.HasSubCommands() && !cmd.Runnable()
+}
+
+func noUnknownSubcommand(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 || args[0] == helpCommandName {
+		return nil
+	}
+	return &client.CLIError{
+		Message:    fmt.Sprintf("unknown command %q for %q", args[0], cmd.CommandPath()),
+		Suggestion: fmt.Sprintf("Run '%s --help' to see its commands.", cmd.CommandPath()),
+	}
+}
+
+// showGroupHelp keeps 'dcs servers' and 'dcs servers help' printing the
+// group's help and exiting 0, as they did before the group became runnable.
+func showGroupHelp(cmd *cobra.Command, _ []string) error {
+	return cmd.Help()
 }
 
 func addToGroup(root *cobra.Command, groupID string, cmds ...*cobra.Command) {
@@ -113,6 +152,14 @@ func addToGroup(root *cobra.Command, groupID string, cmds ...*cobra.Command) {
 		cmd.GroupID = groupID
 		root.AddCommand(cmd)
 	}
+}
+
+// newAPIClient builds the client for the loaded credentials, flagging a key
+// from DCS_API_KEY so a rejection does not send a script to 'dcs login'.
+func newAPIClient(settings *config.Config) *client.Client {
+	api := client.New(settings.APIURL, settings.APIKey)
+	api.SetKeyFromEnvironment(settings.APIKeyFromEnv)
+	return api
 }
 
 func requireAuth() error {

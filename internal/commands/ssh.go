@@ -42,7 +42,7 @@ func newSSHCmd() *cobra.Command {
 
 			server, err := selectServer()
 			if err != nil {
-				return fmt.Errorf("selectServer: %w", err)
+				return fmt.Errorf("selectServer: %w", ui.ExplainNonInteractive(err, "Name the server: dcs ssh <server>."))
 			}
 
 			return sshIntoServer(server.ID)

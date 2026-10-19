@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -48,7 +49,7 @@ func TestDeleteCommandOutput(t *testing.T) {
 		{name: "human success", force: true, status: http.StatusOK, wantDeletes: 1},
 		{name: "human quiet", quiet: true, force: true, status: http.StatusOK, wantDeletes: 1},
 		{name: "human rejected", force: true, status: http.StatusForbidden, wantDeletes: 1, wantError: "Permission denied"},
-		{name: "human requires confirmation", status: http.StatusOK, wantError: "interactive input"},
+		{name: "human requires confirmation", status: http.StatusOK, wantError: "interactive input\n\n  Pass --force to skip the confirmation."},
 	}
 	for _, resource := range resources {
 		t.Run(resource.name, func(t *testing.T) {
@@ -130,5 +131,81 @@ func TestDeleteCommandOutput(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// A script that runs `dcs servers delete "$SERVER" --force` with the variable
+// unset, or with a guess that fits two resources, must never send a DELETE.
+func TestDeleteNeverReachesAnAmbiguousOrBlankTarget(t *testing.T) {
+	twins := func(nameKey string) []map[string]string {
+		return []map[string]string{
+			{"id": "a1b2c3d4-0000-4000-8000-000000000001", nameKey: "twin"},
+			{"id": "a1b2c3d4-0000-4000-8000-000000000002", nameKey: "TWIN"},
+		}
+	}
+	resources := []struct {
+		name     string
+		command  func() *cobra.Command
+		listPath string
+		listing  any
+		extra    []string
+	}{
+		{"server", newServersDeleteCmd, client.PathServers, twins("name"), nil},
+		{"site", newSitesDeleteCmd, client.PathSites("srv-1"), twins("domain"), []string{"--server", "srv-1"}},
+		{"database", newDBDeleteCmd, client.PathDatabases("srv-1"), twins("name"), []string{"--server", "srv-1"}},
+		{"cron job", newCronDeleteCmd, client.PathCronJobs("srv-1"), twins("name"), []string{"--server", "srv-1"}},
+		{"daemon", newDaemonDeleteCmd, client.PathDaemons("srv-1"), twins("name"), []string{"--server", "srv-1"}},
+		{"SSH key", newKeysRmCmd, client.PathSSHKeys, twins("name"), nil},
+		{"API key", newAPIKeysDeleteCmd, client.PathAPIKeys, twins("name"), nil},
+		{"storage file", newStorageRmCmd, client.PathStorageFiles, map[string]any{"files": twins("name")}, nil},
+	}
+	inputs := []struct {
+		name       string
+		input      string
+		wantErr    error
+		wantListed bool
+	}{
+		{name: "empty", input: "", wantErr: errLookupInputRequired},
+		{name: "whitespace", input: "  ", wantErr: errLookupInputRequired},
+		{name: "one letter shared by two IDs", input: "a", wantErr: errLookupNotFound, wantListed: true},
+		{name: "prefix shared by two IDs", input: "a1b2c3d4", wantErr: errLookupAmbiguous, wantListed: true},
+		{name: "name shared by two resources", input: "twin", wantErr: errLookupAmbiguous, wantListed: true},
+	}
+	for _, resource := range resources {
+		for _, input := range inputs {
+			for _, jsonMode := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/json=%t", resource.name, input.name, jsonMode), func(t *testing.T) {
+					var deletes, listed atomic.Int32
+					setupContractAPI(t, func(w http.ResponseWriter, r *http.Request) {
+						switch {
+						case r.Method == http.MethodDelete:
+							deletes.Add(1)
+							writeContractResponse(w, nil)
+						case r.URL.Path == resource.listPath:
+							listed.Add(1)
+							writeContractResponse(w, resource.listing)
+						case r.URL.Path == client.PathServers:
+							writeContractResponse(w, sampleServers())
+						default:
+							t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+							w.WriteHeader(http.StatusNotFound)
+						}
+					})
+					if jsonMode {
+						setJSONOutput()
+					}
+					cmd := resource.command()
+					cmd.SilenceUsage, cmd.SilenceErrors = true, true
+					cmd.SetArgs(append(append([]string{input.input}, resource.extra...), "--force"))
+					var runErr error
+					captureStderr(t, func() {
+						captureStdout(t, func() { runErr = cmd.Execute() })
+					})
+					require.ErrorIs(t, runErr, input.wantErr)
+					assert.Zero(t, deletes.Load(), "no DELETE may be sent")
+					assert.Equal(t, input.wantListed, listed.Load() > 0, "blank input is refused before the lookup lists anything")
+				})
+			}
+		}
 	}
 }

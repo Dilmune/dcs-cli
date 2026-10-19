@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -61,18 +62,29 @@ func RunWithSpinner(message string, fn func() error) error {
 		return fn()
 	}
 
-	errCh := make(chan error, 1)
 	p := tea.NewProgram(newSpinnerModel(message), tea.WithColorProfile(painter.profile))
+	return runAlongside(func() error {
+		_, err := p.Run()
+		return err
+	}, fn, func() { p.Send(spinnerDoneMsg{}) })
+}
 
+// runAlongside runs fn in the background while show draws progress, and
+// answers only once fn has returned. fn is usually a request that changes
+// something, so failing as soon as the display does would report an error for
+// an operation that may still complete.
+func runAlongside(show, fn func() error, done func()) error {
+	errCh := make(chan error, 1)
 	go func() {
 		err := fn()
+		done()
 		errCh <- err
-		p.Send(spinnerDoneMsg{})
 	}()
 
-	if _, err := p.Run(); err != nil {
-		return err
+	showErr := show()
+	err := <-errCh
+	if showErr != nil {
+		return errors.Join(err, fmt.Errorf("show progress spinner: %w", showErr))
 	}
-
-	return <-errCh
+	return err
 }

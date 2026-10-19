@@ -103,7 +103,7 @@ func newFirewallListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -160,7 +160,7 @@ func newFirewallAddCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&port, "port", "", "Port number or range (e.g. 80, 8080:8090)")
 	cmd.Flags().StringVar(&protocol, "protocol", "tcp", "Protocol (tcp, udp)")
 	cmd.Flags().StringVar(&action, "action", "allow", "Action (allow, deny)")
@@ -198,7 +198,7 @@ func newFirewallRemoveCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete firewall rule %d?", ruleNumber))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete firewall rule %d?", ruleNumber))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -222,7 +222,7 @@ func newFirewallRemoveCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
@@ -271,7 +271,7 @@ func newFirewallToggleCmd() *cobra.Command {
 				confirmed, err := ui.Confirm(fmt.Sprintf("Firewall is currently %s. %s it?",
 					formatFirewallState(status.Enabled), action))
 				if err != nil {
-					return fmt.Errorf("confirm: %w", err)
+					return fmt.Errorf("confirm: %w", ui.ExplainNonInteractive(err, "Pass --enable or --disable."))
 				}
 				if !confirmed {
 					return nil
@@ -300,7 +300,7 @@ func newFirewallToggleCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVar(&enable, "enable", false, "Enable the firewall")
 	cmd.Flags().BoolVar(&disable, "disable", false, "Disable the firewall")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")

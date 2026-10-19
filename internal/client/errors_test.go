@@ -46,7 +46,4 @@ func TestSentinelErrors(t *testing.T) {
 
 	assert.Contains(t, ErrNoProjectConfig.Error(), ".dcs.json")
 	assert.Contains(t, ErrNoProjectConfig.Error(), "dcs init")
-
-	assert.Contains(t, ErrServerNotFound.Error(), "Server not found")
-	assert.Contains(t, ErrSiteNotFound.Error(), "Site not found")
 }

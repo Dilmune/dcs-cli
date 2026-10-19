@@ -226,6 +226,14 @@ func newAPIKeysCreateCmd() *cobra.Command {
 	return cmd
 }
 
+var apiKeyLookup = lookup[APIKey]{
+	kind:     "API key",
+	wanted:   "an API key name or ID",
+	listHint: "Run 'dcs api-keys list' to see your keys.",
+	name:     func(k APIKey) string { return k.Name },
+	id:       func(k APIKey) string { return k.ID },
+}
+
 func newAPIKeysDeleteCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
@@ -239,30 +247,11 @@ func newAPIKeysDeleteCmd() *cobra.Command {
 				return fmt.Errorf("auth: %w", err)
 			}
 
-			resp, err := apiClient.Get(context.Background(), client.PathAPIKeys, nil)
+			key, err := apiKeyLookup.find(cmd.Context(), args[0], func(ctx context.Context) ([]APIKey, error) {
+				return listAll[APIKey](ctx, client.PathAPIKeys)
+			})
 			if err != nil {
-				return fmt.Errorf("fetch: %w", err)
-			}
-
-			keys, err := client.Decode[[]APIKey](resp)
-			if err != nil {
-				return fmt.Errorf("decode response: %w", err)
-			}
-
-			var key *APIKey
-			for _, k := range keys {
-				if strings.EqualFold(k.Name, args[0]) || k.ID == args[0] || strings.HasPrefix(k.ID, args[0]) {
-					found := k
-					key = &found
-					break
-				}
-			}
-
-			if key == nil {
-				return &client.CLIError{
-					Message:    fmt.Sprintf("API key '%s' not found.", args[0]),
-					Suggestion: "Run 'dcs api-keys list' to see your keys.",
-				}
+				return fmt.Errorf("resolve API key: %w", err)
 			}
 
 			if jsonOutput {
@@ -270,7 +259,7 @@ func newAPIKeysDeleteCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete API key %s?", ui.Bold.Render(key.Name)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete API key %s?", ui.Bold.Render(key.Name)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}

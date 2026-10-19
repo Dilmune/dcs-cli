@@ -2,14 +2,17 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -209,6 +212,7 @@ func newStorageUploadCmd() *cobra.Command {
 
 func newStorageDownloadCmd() *cobra.Command {
 	var outputPath, bucketName string
+	var force bool
 	cmd := &cobra.Command{
 		Use:     "download <filename-or-key>",
 		Short:   "Download a file",
@@ -222,6 +226,19 @@ func newStorageDownloadCmd() *cobra.Command {
 			file, err := prepareStorageDownload(cmd.Context(), apiClient, bucketName, args[0])
 			if err != nil {
 				return fmt.Errorf("prepare download: %w", err)
+			}
+			dest := outputPath
+			replace := outputPath != "" || force
+			if dest == "" {
+				if dest, err = localDownloadName(file.Name); err != nil {
+					return fmt.Errorf("choose local file: %w", err)
+				}
+			}
+			if !replace {
+				// Only spares the transfer; saveStorageDownload is what refuses.
+				if _, err := os.Lstat(dest); err == nil {
+					return existingDownloadError(dest)
+				}
 			}
 
 			req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet, file.URL, nil)
@@ -238,11 +255,6 @@ func newStorageDownloadCmd() *cobra.Command {
 				return fmt.Errorf("download failed (%d)", dlResp.StatusCode)
 			}
 
-			dest := outputPath
-			if dest == "" {
-				dest = file.Name
-			}
-
 			fmt.Println()
 			if bucketName != "" {
 				file.Size = dlResp.ContentLength
@@ -250,7 +262,7 @@ func newStorageDownloadCmd() *cobra.Command {
 			pw := ui.NewProgressWriter(file.Size, "Downloading")
 			body := pw.WrapReader(dlResp.Body)
 
-			written, err := saveStorageDownload(dest, body)
+			written, err := saveStorageDownload(dest, body, replace, os.Link)
 			if err != nil {
 				fmt.Println()
 				return fmt.Errorf("write file: %w", err)
@@ -262,11 +274,39 @@ func newStorageDownloadCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Output file path")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Replace an existing file of the same name in the current directory")
 	addStorageBucketFlag(cmd, &bucketName)
 	return cmd
 }
 
-func saveStorageDownload(dest string, body io.Reader) (int64, error) {
+// localDownloadName turns a remote name into a file in the working directory.
+// The name is server data another org member chose, so it never gets to pick a
+// directory, and a name that would rewrite the terminal or read differently
+// from its bytes is refused.
+func localDownloadName(remote string) (string, error) {
+	name := filepath.Base(remote)
+	if name == "." || !filepath.IsLocal(name) || strings.ContainsFunc(name, isUnsafeNameRune) {
+		return "", fmt.Errorf("remote name %q is not a safe local file name, pass --output", remote)
+	}
+	return name, nil
+}
+
+// isUnsafeNameRune leaves other format characters alone: ZWJ, ZWNJ, LRM and
+// RLM are ordinary in Arabic, Persian and emoji names.
+func isUnsafeNameRune(r rune) bool {
+	return unicode.IsControl(r) || (r >= '\u202A' && r <= '\u202E') || (r >= '\u2066' && r <= '\u2069')
+}
+
+func existingDownloadError(dest string) error {
+	if info, err := os.Lstat(dest); err == nil && info.IsDir() {
+		return fmt.Errorf("%q already exists and is a folder; pass --output to save elsewhere", dest)
+	}
+	return fmt.Errorf("%q already exists; pass --force to replace it or --output to save elsewhere", dest)
+}
+
+// link is os.Link outside tests; it is a parameter so a test can make the name
+// appear at the last moment, which is the case the hard link exists for.
+func saveStorageDownload(dest string, body io.Reader, replace bool, link func(oldname, newname string) error) (int64, error) {
 	// Keep an existing destination intact until the complete transfer is closed.
 	out, err := os.CreateTemp(filepath.Dir(dest), ".dcs-download-*")
 	if err != nil {
@@ -282,8 +322,20 @@ func saveStorageDownload(dest string, body io.Reader) (int64, error) {
 	if err := out.Close(); err != nil {
 		return 0, fmt.Errorf("close temporary download: %w", err)
 	}
-	if err := os.Rename(out.Name(), dest); err != nil {
-		return 0, fmt.Errorf("save download to %s: %w", dest, err)
+	if replace {
+		if err := os.Rename(out.Name(), dest); err != nil {
+			return 0, fmt.Errorf("save download to %s: %w", dest, err)
+		}
+		return written, nil
+	}
+	// A hard link fails when anything already has the name and never follows a
+	// symlink there, so nothing can appear between a check and the write. A
+	// filesystem without hard links refuses too; --force renames instead.
+	if err := link(out.Name(), dest); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return 0, existingDownloadError(dest)
+		}
+		return 0, fmt.Errorf("save download to %q without replacing anything (pass --force or --output): %w", dest, err)
 	}
 	return written, nil
 }
@@ -318,7 +370,7 @@ func newStorageRmCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete %s?", label))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete %s?", label))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -383,28 +435,30 @@ func newStorageUsageCmd() *cobra.Command {
 	}
 }
 
-// resolveStorageFile finds a file by name or ID from the user's storage.
-func resolveStorageFile(nameOrID string) (*storageFile, error) {
-	resp, err := apiClient.Get(context.Background(), client.PathStorageFiles, nil)
-	if err != nil {
-		return nil, err
-	}
+// The legacy storage listing names its page size per_page, unlike the rest of
+// the API.
+const storagePerPageQuery = "per_page"
 
+var storageFileLookup = lookup[storageFile]{
+	kind:     "file",
+	wanted:   "a file name or ID",
+	listHint: "Run 'dcs storage ls' to see your files.",
+	name:     func(f storageFile) string { return f.Name },
+	id:       func(f storageFile) string { return f.ID },
+}
+
+func resolveStorageFile(nameOrID string) (*storageFile, error) {
+	return storageFileLookup.find(context.Background(), nameOrID, func(ctx context.Context) ([]storageFile, error) {
+		return listPages(ctx, client.PathStorageFiles, storagePerPageQuery, decodeStorageFiles)
+	})
+}
+
+func decodeStorageFiles(resp *client.APIResponse) ([]storageFile, error) {
 	listing, err := client.Decode[storageListing](resp)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode storage listing: %w", err)
 	}
-
-	for _, f := range listing.Files {
-		if strings.EqualFold(f.Name, nameOrID) || f.ID == nameOrID || strings.HasPrefix(f.ID, nameOrID) {
-			return &f, nil
-		}
-	}
-
-	return nil, &client.CLIError{
-		Message:    fmt.Sprintf("File %q not found.", nameOrID),
-		Suggestion: "Run 'dcs storage ls' to see your files.",
-	}
+	return listing.Files, nil
 }
 
 func detectContentType(path string) string {

@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -13,23 +12,37 @@ import (
 
 type CronJob struct {
 	ID        string `json:"id"`
-	ServerID  string `json:"server_id"`
+	ServerID  string `json:"serverId"`
 	Name      string `json:"name"`
 	Command   string `json:"command"`
 	Schedule  string `json:"schedule"`
-	RunAsUser string `json:"run_as_user"`
+	RunAsUser string `json:"runAsUser"`
 	Enabled   bool   `json:"enabled"`
-	CreatedAt string `json:"created_at"`
+	CreatedAt string `json:"createdAt"`
 }
 
 type CronExecution struct {
 	ID          string `json:"id"`
-	CronJobID   string `json:"cron_job_id"`
-	StartedAt   string `json:"started_at"`
-	CompletedAt string `json:"completed_at"`
-	ExitCode    int    `json:"exit_code"`
-	Output      string `json:"output"`
-	DurationMs  int    `json:"duration_ms"`
+	CronJobID   string `json:"cronJobId"`
+	StartedAt   string `json:"startedAt"`
+	CompletedAt string `json:"completedAt"`
+	// A pointer so an absent exit code stays distinct from a recorded 0.
+	ExitCode *int `json:"exitCode"`
+	// False for a run whose exit code the server cannot vouch for. Such a run
+	// still carries exitCode 0, which must not be shown as success.
+	ExitCodeRecorded bool   `json:"exitCodeRecorded"`
+	Output           string `json:"output"`
+	DurationMs       int    `json:"durationMs"`
+}
+
+const exitCodeNotRecorded = "not recorded"
+
+// exitCodeCell is what the history table shows for a run's exit code.
+func (e CronExecution) exitCodeCell() string {
+	if !e.ExitCodeRecorded || e.ExitCode == nil {
+		return ui.Muted.Render(exitCodeNotRecorded)
+	}
+	return fmt.Sprintf("%d", *e.ExitCode)
 }
 
 func newCronCmd() *cobra.Command {
@@ -109,7 +122,7 @@ func newCronListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -193,7 +206,7 @@ func newCronCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().StringVar(&name, "name", "", "Cron job name")
 	cmd.Flags().StringVar(&command, "command", "", "Command to execute")
 	cmd.Flags().StringVar(&schedule, "schedule", "", "Cron schedule expression")
@@ -228,7 +241,7 @@ func newCronDeleteCmd() *cobra.Command {
 			}
 
 			if !force {
-				confirmed, err := ui.Confirm(fmt.Sprintf("Delete cron job %s?", ui.Bold.Render(cronJob.Name)))
+				confirmed, err := confirmForceable(fmt.Sprintf("Delete cron job %s?", ui.Bold.Render(cronJob.Name)))
 				if err != nil {
 					return fmt.Errorf("confirm: %w", err)
 				}
@@ -252,7 +265,7 @@ func newCronDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
@@ -294,7 +307,7 @@ func newCronRunCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
@@ -349,11 +362,10 @@ func newCronHistoryCmd() *cobra.Command {
 					output = output[:50] + "..."
 				}
 				duration := fmt.Sprintf("%dms", e.DurationMs)
-				exitCode := fmt.Sprintf("%d", e.ExitCode)
 				rows[i] = []string{
 					e.StartedAt,
 					duration,
-					exitCode,
+					e.exitCodeCell(),
 					output,
 				}
 			}
@@ -363,35 +375,20 @@ func newCronHistoryCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&serverFlag, "server", "", "Server name or ID")
+	addServerFlag(cmd, &serverFlag)
 	return cmd
 }
 
+var cronJobLookup = lookup[CronJob]{
+	kind:     "cron job",
+	wanted:   "a cron job name or ID",
+	listHint: "Run 'dcs cron list' to see your cron jobs.",
+	name:     func(j CronJob) string { return j.Name },
+	id:       func(j CronJob) string { return j.ID },
+}
+
 func resolveCronJob(serverID, nameOrID string) (*CronJob, error) {
-	resp, err := apiClient.Get(context.Background(), client.PathCronJobs(serverID), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	jobs, err := client.Decode[[]CronJob](resp)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, j := range jobs {
-		if strings.EqualFold(j.Name, nameOrID) {
-			return &j, nil
-		}
-	}
-
-	for _, j := range jobs {
-		if j.ID == nameOrID || strings.HasPrefix(j.ID, nameOrID) {
-			return &j, nil
-		}
-	}
-
-	return nil, &client.CLIError{
-		Message:    fmt.Sprintf("Cron job '%s' not found.", nameOrID),
-		Suggestion: "Run 'dcs cron list' to see your cron jobs.",
-	}
+	return cronJobLookup.find(context.Background(), nameOrID, func(ctx context.Context) ([]CronJob, error) {
+		return listAll[CronJob](ctx, client.PathCronJobs(serverID))
+	})
 }

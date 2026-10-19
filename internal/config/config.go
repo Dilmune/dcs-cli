@@ -53,6 +53,9 @@ type Config struct {
 	User            *UserInfo `json:"user,omitempty"`
 	DefaultServerID string    `json:"default_server_id,omitempty"`
 	UseKeychain     bool      `json:"use_keychain,omitempty"`
+	// APIKeyFromEnv records that DCS_API_KEY supplied the key, so a rejection
+	// can name the variable. It is never written to the config file.
+	APIKeyFromEnv bool `json:"-"`
 }
 
 // Load reads the config from disk, with env var and keychain overrides.
@@ -76,6 +79,7 @@ func Load() *Config {
 
 	if v := os.Getenv("DCS_API_KEY"); v != "" {
 		cfg.APIKey = v
+		cfg.APIKeyFromEnv = true
 	}
 	if v := os.Getenv("DCS_API_URL"); v != "" {
 		cfg.APIURL = v

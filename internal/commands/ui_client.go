@@ -282,6 +282,8 @@ func (e *uiReadError) Unwrap() error { return e.cause }
 func safeUIError(err error) error {
 	message := "Request failed. Check your connection and dcs whoami, then retry."
 	switch {
+	case errors.Is(err, client.ErrEnvAPIKeyRejected):
+		message = "The API key in DCS_API_KEY was rejected. Check or replace it, then reopen dcs ui."
 	case errors.Is(err, client.ErrNotAuthenticated):
 		message = "Sign in with dcs login, then reopen dcs ui."
 	case errors.Is(err, client.ErrForbidden):

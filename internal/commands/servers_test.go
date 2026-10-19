@@ -2,6 +2,9 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,4 +124,96 @@ func TestServersListUnauthenticated(t *testing.T) {
 
 	err := cmd.Execute()
 	assert.ErrorIs(t, err, client.ErrNotAuthenticated)
+}
+
+// The server response shape: the installedSoftware map carries true or a
+// version, and five runtimes keep columns of their own.
+func softwareFixtureServer(extra map[string]any) map[string]any {
+	server := map[string]any{
+		"id": "srv-1", "name": "fixture-web", "status": "active",
+		"installedSoftware": map[string]any{"docker": true, "fail2ban": true, "git": true, "pm2": true},
+		"phpVersions":       []string{},
+		"nodeVersion":       "22",
+		"installMySQL":      false,
+		"installPostgres":   true,
+		"installRedis":      true,
+	}
+	for key, value := range extra {
+		server[key] = value
+	}
+	return server
+}
+
+func TestSoftwareListReadsTheServerResponse(t *testing.T) {
+	tests := []struct {
+		name      string
+		server    map[string]any
+		wantLines []string
+		wantJSON  string
+	}{
+		{
+			name:      "map entries and runtime columns",
+			server:    softwareFixtureServer(nil),
+			wantLines: []string{"docker", "fail2ban", "git", "node 22", "pm2", "postgres", "redis"},
+			wantJSON:  `["docker","fail2ban","git","node","pm2","postgres","redis"]`,
+		},
+		{
+			name: "versions, several PHP releases and a removed entry",
+			server: softwareFixtureServer(map[string]any{
+				"installedSoftware": map[string]any{"sqlite": true, "bun": "1.2", "gone": false, "blank": ""},
+				"phpVersions":       []string{"8.3", "8.2"},
+				"nodeVersion":       "",
+				"installMySQL":      true,
+				"installPostgres":   false,
+				"installRedis":      false,
+			}),
+			wantLines: []string{"bun 1.2", "mysql", "php 8.2", "php 8.3", "sqlite"},
+			wantJSON:  `["bun","mysql","php","sqlite"]`,
+		},
+		{
+			name: "nothing installed",
+			server: softwareFixtureServer(map[string]any{
+				"installedSoftware": map[string]any{}, "nodeVersion": "", "installPostgres": false, "installRedis": false,
+			}),
+			wantJSON: `[]`,
+		},
+	}
+	for _, tt := range tests {
+		for _, jsonMode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/json=%t", tt.name, jsonMode), func(t *testing.T) {
+				api := newMockAPI()
+				api.on(http.MethodGet, client.PathServers, http.StatusOK, []any{tt.server})
+				api.on(http.MethodGet, client.PathServer("srv-1"), http.StatusOK, tt.server)
+				t.Cleanup(setupTest(t, api))
+				if jsonMode {
+					setJSONOutput()
+				}
+				out := executeContractCommand(t, newSoftwareListCmd(), "--server", "fixture-web")
+				if jsonMode {
+					assert.JSONEq(t, tt.wantJSON, out)
+					return
+				}
+				if len(tt.wantLines) == 0 {
+					assert.Contains(t, out, "No software installed")
+					return
+				}
+				var got []string
+				for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+					got = append(got, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "*")))
+				}
+				assert.Equal(t, tt.wantLines, got)
+			})
+		}
+	}
+}
+
+func TestServersInfoShowsInstalledSoftware(t *testing.T) {
+	server := softwareFixtureServer(nil)
+	api := newMockAPI()
+	api.on(http.MethodGet, client.PathServers, http.StatusOK, []any{server})
+	api.on(http.MethodGet, client.PathServer("srv-1"), http.StatusOK, server)
+	t.Cleanup(setupTest(t, api))
+
+	out := executeContractCommand(t, newServersInfoCmd(), "fixture-web")
+	assert.Contains(t, out, "docker, fail2ban, git, node, pm2, postgres, redis")
 }

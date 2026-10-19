@@ -46,7 +46,7 @@ func completeSiteNames(cmd *cobra.Command, args []string, toComplete string) ([]
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	serverFlag, _ := cmd.Flags().GetString("server")
+	serverFlag, _ := cmd.Flags().GetString(serverFlagName)
 	serverID, err := getServerID(serverFlag)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp

@@ -2,7 +2,7 @@ module github.com/dilmune/dcs-cli
 
 go 1.25.8
 
-toolchain go1.26.8
+toolchain go1.26.9
 
 require (
 	charm.land/bubbles/v2 v2.2.1
